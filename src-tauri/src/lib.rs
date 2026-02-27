@@ -228,6 +228,14 @@ fn hide_overlay_and_refocus(app: &AppHandle) {
             let _ = main_win.minimize();
         }
     }
+
+    // On Linux, xdotool can refocus the previous window
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdotool")
+            .args(["getactivewindow", "windowfocus"])
+            .output();
+    }
 }
 
 /// Get configuration
@@ -690,6 +698,29 @@ async fn do_stop_and_paste(app: AppHandle, state: State<'_, AppState>) -> Result
             }
             Err(e) => {
                 tracing::error!("enigo error: {}", e);
+                tracing::info!("Text is in clipboard, paste with Ctrl+V");
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::process::Command::new("xdotool")
+            .args(["key", "ctrl+v"])
+            .output();
+
+        match status {
+            Ok(output) => {
+                if output.status.success() {
+                    tracing::info!("Ctrl+V simulated via xdotool");
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    tracing::error!("xdotool error: {}", stderr);
+                    tracing::info!("Text is in clipboard, paste with Ctrl+V");
+                }
+            }
+            Err(e) => {
+                tracing::error!("xdotool launch error: {}", e);
                 tracing::info!("Text is in clipboard, paste with Ctrl+V");
             }
         }
