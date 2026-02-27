@@ -220,6 +220,14 @@ fn hide_overlay_and_refocus(app: &AppHandle) {
             .arg("tell application \"System Events\" to set frontmost of process \"dictea\" to false")
             .output();
     }
+
+    // On Windows, minimizing the main window gives focus back to the previous app
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(main_win) = app.get_webview_window("main") {
+            let _ = main_win.minimize();
+        }
+    }
 }
 
 /// Get configuration
@@ -670,13 +678,20 @@ async fn do_stop_and_paste(app: AppHandle, state: State<'_, AppState>) -> Result
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
         use enigo::{Enigo, Key, Keyboard, Settings};
-        if let Ok(mut enigo) = Enigo::new(&Settings::default()) {
-            enigo.key(Key::Control, enigo::Direction::Press).ok();
-            enigo.key(Key::Unicode('v'), enigo::Direction::Click).ok();
-            enigo.key(Key::Control, enigo::Direction::Release).ok();
+        match Enigo::new(&Settings::default()) {
+            Ok(mut enigo) => {
+                enigo.key(Key::Control, enigo::Direction::Press).ok();
+                enigo.key(Key::Unicode('v'), enigo::Direction::Click).ok();
+                enigo.key(Key::Control, enigo::Direction::Release).ok();
+                tracing::info!("Ctrl+V simulated via enigo");
+            }
+            Err(e) => {
+                tracing::error!("enigo error: {}", e);
+                tracing::info!("Text is in clipboard, paste with Ctrl+V");
+            }
         }
     }
 
