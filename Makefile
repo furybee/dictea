@@ -61,8 +61,10 @@ release: ## Crée un tag et déclenche la release CI/CD (usage: make release VER
 	@sed -i '' '3s/"version": "[^"]*"/"version": "$(VERSION)"/' package.json
 	git add src-tauri/tauri.conf.json src-tauri/Cargo.toml package.json
 	git diff --cached --quiet || git commit -m "release: v$(VERSION)"
-	git tag -d "v$(VERSION)"
+	@# Delete tag locally and remotely if it already exists, then recreate
+	-@git tag -d "v$(VERSION)" 2>/dev/null
+	-@git push origin :refs/tags/v$(VERSION) 2>/dev/null
 	git tag "v$(VERSION)"
 	git push origin main --tags
-	@echo "$(GREEN)Tag v$(VERSION) poussé — GitHub Actions va builder la release$(NC)"
+	@echo "$(GREEN)Tag v$(VERSION) pushed — GitHub Actions will build the release$(NC)"
 
