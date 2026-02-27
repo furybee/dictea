@@ -30,7 +30,23 @@ Intelligent voice dictation for macOS. Press a shortcut to start, speak, press a
 | **Voxtral** (Mistral) | `voxtral-mini-latest` | `mistral-small-latest` | [console.mistral.ai](https://console.mistral.ai/api-keys) |
 | **Gemini** (Google) | `gemini-2.5-flash` | `gemini-2.5-flash-lite` | [aistudio.google.com](https://aistudio.google.com/apikey) |
 
-## Getting started
+## Installation
+
+Download the latest release from [GitHub Releases](https://github.com/furybee/dictea/releases).
+
+| Platform | File |
+|----------|------|
+| macOS | `.dmg` |
+| Windows | `.msi` |
+| Linux | `.deb`, `.AppImage` |
+
+> **macOS:** The app is not signed with an Apple Developer certificate. After installing, run:
+> ```bash
+> xattr -cr /Applications/Dictea.app
+> ```
+> Then open the app normally.
+
+## Development
 
 ### Prerequisites
 
