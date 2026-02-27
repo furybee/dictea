@@ -62,7 +62,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYwMDY4N0RFQjAyNjRBMDYKUldRR1NpYXczb2NHWUEwUVRoYXd5QTdzSFkvdGpKTFlWMEJtelJ6V3RDeHh4Vmg0QmFXNDhnTGcK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4RjdGNUI1MTU2NzgyRDIKUldUU2dtY1Z0ZlgzcUJRZ3pDSERNdjRVdVMzYm9EQnZTVk9JZUNVY3h3Z0Q2MzNETlBNU2xIWlcK",
       "endpoints": [
         "https://github.com/furybee/dictea/releases/latest/download/latest.json"
       ]
