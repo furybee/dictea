@@ -1,0 +1,59 @@
+[package]
+name = "dictea"
+version = "0.2.0"
+edition = "2021"
+description = "Application STT locale temps réel"
+authors = ["Sebastien Fontaine"]
+
+[lib]
+name = "dictea_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Audio capture cross-platform
+cpal = "0.15"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTTP client pour Voxtral API
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+
+# Encodage audio WAV
+hound = "3.5"
+
+# Base64 encoding (for Gemini API)
+base64 = "0.22"
+
+# Global shortcuts
+tauri-plugin-global-shortcut = "2"
+
+# Clipboard
+arboard = "3"
+
+# Auto-update
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+
+# Pour simuler les touches (paste)
+enigo = "0.2"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-opener = "2"

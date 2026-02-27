@@ -1,0 +1,27 @@
+[package]
+name = "dictea"
+version = "0.1.0"
+edition = "2021"
+description = "Application STT locale temps réel"
+authors = ["Sebastien Fontaine"]
+
+[dependencies]
+# Audio capture cross-platform
+cpal = "0.15"
+
+# Ring buffer temps réel
+ringbuf = "0.4"
+
+# Async runtime
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+mockall = "0.13"
