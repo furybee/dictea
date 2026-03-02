@@ -7,6 +7,7 @@ export function useConfig() {
   const [apiKey, setApiKey] = useState("");
   const [mistralApiKey, setMistralApiKey] = useState("");
   const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [audioDevice, setAudioDevice] = useState("");
   const [sttEngine, setSttEngine] = useState("openai");
   const [outputLanguage, setOutputLanguage] = useState("auto");
   const [reformulate, setReformulate] = useState(false);
@@ -21,6 +22,7 @@ export function useConfig() {
         setApiKey(appConfig.openai_api_key);
         setMistralApiKey(appConfig.mistral_api_key);
         setGeminiApiKey(appConfig.gemini_api_key);
+        setAudioDevice(appConfig.audio_device || "");
         setSttEngine(appConfig.stt_engine || "openai");
         setOutputLanguage(appConfig.output_language);
         loaded.current = true;
@@ -39,12 +41,13 @@ export function useConfig() {
         openai_api_key: apiKey,
         mistral_api_key: mistralApiKey,
         gemini_api_key: geminiApiKey,
+        audio_device: audioDevice,
         stt_engine: sttEngine,
         output_language: outputLanguage,
         reformulate,
       },
     }).catch(console.error);
-  }, [config, apiKey, mistralApiKey, geminiApiKey, sttEngine, outputLanguage, reformulate]);
+  }, [config, apiKey, mistralApiKey, geminiApiKey, audioDevice, sttEngine, outputLanguage, reformulate]);
 
   useEffect(() => {
     if (!loaded.current) return;
@@ -59,6 +62,8 @@ export function useConfig() {
     setMistralApiKey,
     geminiApiKey,
     setGeminiApiKey,
+    audioDevice,
+    setAudioDevice,
     sttEngine,
     setSttEngine,
     outputLanguage,

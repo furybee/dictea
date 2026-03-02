@@ -775,3 +775,32 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.12);
 }
+
+/* Audio device selector with volume meter */
+.device-select-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 380px;
+}
+
+.device-select-row .settings-select {
+  flex: 1;
+  max-width: none;
+}
+
+.volume-meter {
+  width: 80px;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.volume-meter-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #6366f1, #10b981);
+  transition: width 80ms ease-out;
+}

@@ -41,6 +41,8 @@ export function SettingsView() {
               setOutputLanguage={config.setOutputLanguage}
               reformulate={config.reformulate}
               setReformulate={config.setReformulate}
+              audioDevice={config.audioDevice}
+              setAudioDevice={config.setAudioDevice}
             />
           )}
 

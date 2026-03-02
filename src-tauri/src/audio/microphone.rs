@@ -13,12 +13,15 @@ use thiserror::Error;
 pub struct AudioConfig {
     /// Target sample rate (16kHz for STT)
     pub target_sample_rate: u32,
+    /// Device name to use. None = system default.
+    pub device_name: Option<String>,
 }
 
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
             target_sample_rate: 16000,
+            device_name: None,
         }
     }
 }
@@ -93,6 +96,14 @@ impl Drop for AudioHandle {
     }
 }
 
+/// Find an input device by name
+fn find_device_by_name(name: &str) -> Option<cpal::Device> {
+    let host = cpal::default_host();
+    host.input_devices()
+        .ok()?
+        .find(|d| d.name().ok().as_deref() == Some(name))
+}
+
 /// Simple linear resample from source_rate to target_rate
 fn resample(samples: &[f32], source_rate: u32, target_rate: u32) -> Vec<f32> {
     if source_rate == target_rate {
@@ -138,9 +149,17 @@ where
     F: Fn(Vec<f32>) + Send + 'static,
 {
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or(MicrophoneError::NoDevice)?;
+    let device = match &config.device_name {
+        Some(name) if !name.is_empty() => {
+            find_device_by_name(name)
+                .or_else(|| {
+                    tracing::warn!("Device '{}' not found, falling back to default", name);
+                    host.default_input_device()
+                })
+                .ok_or(MicrophoneError::NoDevice)?
+        }
+        _ => host.default_input_device().ok_or(MicrophoneError::NoDevice)?,
+    };
 
     tracing::info!("Audio device: {:?}", device.name());
 
