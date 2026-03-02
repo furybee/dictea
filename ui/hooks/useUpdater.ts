@@ -43,7 +43,8 @@ export function useUpdater() {
       setStatus("done");
       const { relaunch } = await import("@tauri-apps/plugin-process");
       await relaunch();
-    } catch {
+    } catch (e) {
+      console.error("Update failed:", e);
       setStatus("available");
     }
   }, [update]);
