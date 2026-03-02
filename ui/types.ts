@@ -8,6 +8,7 @@ export interface AppConfig {
   stt_engine: string;
   mistral_api_key: string;
   gemini_api_key: string;
+  audio_device: string;
 }
 
 export type Page = "dictation" | "engine" | "shortcut" | "settings";

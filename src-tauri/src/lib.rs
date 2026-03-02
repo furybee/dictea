@@ -33,6 +33,9 @@ pub struct AppConfig {
     /// Gemini API key (used when stt_engine == "gemini")
     #[serde(default)]
     pub gemini_api_key: String,
+    /// Selected audio input device name (empty = system default)
+    #[serde(default)]
+    pub audio_device: String,
 }
 
 fn default_stt_engine() -> String {
@@ -49,6 +52,7 @@ impl Default for AppConfig {
             stt_engine: "openai".to_string(),
             mistral_api_key: String::new(),
             gemini_api_key: String::new(),
+            audio_device: String::new(),
         }
     }
 }
@@ -187,6 +191,8 @@ pub struct AppState {
     transcription: Arc<RwLock<TranscriptionState>>,
     /// Guard against double calls to stop_and_paste
     stopping: Arc<AtomicBool>,
+    /// Mic preview handle for settings UI
+    mic_preview: Arc<Mutex<Option<AudioHandle>>>,
 }
 
 impl AppState {
@@ -196,6 +202,7 @@ impl AppState {
             pipeline: Arc::new(Mutex::new(None)),
             transcription: Arc::new(RwLock::new(TranscriptionState::default())),
             stopping: Arc::new(AtomicBool::new(false)),
+            mic_preview: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -236,6 +243,60 @@ fn hide_overlay_and_refocus(app: &AppHandle) {
             .args(["getactivewindow", "windowfocus"])
             .output();
     }
+}
+
+/// List available audio input devices
+#[tauri::command]
+fn list_audio_devices() -> Vec<String> {
+    AudioHandle::list_devices()
+}
+
+/// Stop mic preview (internal helper)
+async fn stop_mic_preview_internal(state: &AppState) {
+    let mut preview = state.mic_preview.lock().await;
+    if let Some(mut handle) = preview.take() {
+        handle.stop();
+    }
+}
+
+/// Start mic level preview for settings UI
+#[tauri::command]
+async fn start_mic_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device_name: String,
+) -> Result<(), String> {
+    stop_mic_preview_internal(&state).await;
+
+    let audio_config = AudioConfig {
+        target_sample_rate: 16000,
+        device_name: if device_name.is_empty() { None } else { Some(device_name) },
+    };
+
+    let app_handle = app.clone();
+    let last_send = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    let audio_handle = AudioHandle::start(audio_config, move |samples| {
+        let mut last = last_send.lock().unwrap();
+        if last.elapsed().as_millis() < 50 {
+            return;
+        }
+        *last = std::time::Instant::now();
+        let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+        let level = (rms * 50.0).min(1.0);
+        let _ = app_handle.emit("mic_preview_level", level);
+    })
+    .map_err(|e| e.to_string())?;
+
+    let mut preview = state.mic_preview.lock().await;
+    *preview = Some(audio_handle);
+    Ok(())
+}
+
+/// Stop mic level preview
+#[tauri::command]
+async fn stop_mic_preview(state: State<'_, AppState>) -> Result<(), String> {
+    stop_mic_preview_internal(&state).await;
+    Ok(())
 }
 
 /// Get configuration
@@ -418,6 +479,9 @@ async fn start_recording(
 
     let config = state.config.read().await.clone();
 
+    // Stop mic preview to avoid concurrent streams
+    stop_mic_preview_internal(&state).await;
+
     // Create pipeline if needed
     {
         let mut pipeline_guard = state.pipeline.lock().await;
@@ -467,7 +531,15 @@ async fn start_recording(
 
             let (audio_tx, mut audio_rx) = mpsc::unbounded_channel::<Vec<f32>>();
 
-            let audio_handle = AudioHandle::start(AudioConfig::default(), move |samples| {
+            let audio_config = AudioConfig {
+                target_sample_rate: 16000,
+                device_name: if config.audio_device.is_empty() {
+                    None
+                } else {
+                    Some(config.audio_device.clone())
+                },
+            };
+            let audio_handle = AudioHandle::start(audio_config, move |samples| {
                 let _ = audio_tx.send(samples);
             })
             .map_err(|e| e.to_string())?;
@@ -813,6 +885,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             set_config,
+            list_audio_devices,
+            start_mic_preview,
+            stop_mic_preview,
             start_recording,
             stop_recording,
             stop_and_paste,
