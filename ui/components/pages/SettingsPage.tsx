@@ -108,10 +108,6 @@ export function SettingsPage({ audioDevice, setAudioDevice }: SettingsPageProps)
           <p>
             <strong>Dictea</strong> v{appVersion}
           </p>
-          <p>{t("about_desc")}</p>
-          <br />
-          <p>{t("about_engines")}</p>
-          <p>{t("about_features")}</p>
         </div>
       </div>
     </>
