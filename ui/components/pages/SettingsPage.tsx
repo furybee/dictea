@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { useState } from "react";
 import { useI18n, type AppLang } from "../../i18n";
 import { useUpdater } from "../../hooks/useUpdater";
 import { useAudioDevices } from "../../hooks/useAudioDevices";
@@ -13,6 +15,11 @@ export function SettingsPage({ audioDevice, setAudioDevice }: SettingsPageProps)
   const { status, version, checkAndDownload, dismiss } = useUpdater();
   const { devices, level, refreshDevices, startPreview, stopPreview } =
     useAudioDevices();
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion);
+  }, []);
 
   useEffect(() => {
     refreshDevices();
@@ -99,7 +106,7 @@ export function SettingsPage({ audioDevice, setAudioDevice }: SettingsPageProps)
       <div className="settings-section">
         <div className="about-content">
           <p>
-            <strong>Dictea</strong> v0.2
+            <strong>Dictea</strong> v{appVersion}
           </p>
           <p>{t("about_desc")}</p>
           <br />
