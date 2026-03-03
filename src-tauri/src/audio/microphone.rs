@@ -38,6 +38,7 @@ pub enum MicrophoneError {
     #[error("Stream error: {0}")]
     StreamError(String),
 
+    #[allow(dead_code)]
     #[error("Audio thread not started")]
     NotStarted,
 }

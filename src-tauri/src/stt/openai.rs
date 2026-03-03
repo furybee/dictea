@@ -19,6 +19,7 @@ pub struct OpenAiEngine {
     shared_events: Arc<Mutex<VecDeque<SttEvent>>>,
     /// Flag indicating a request is in progress
     pending: Arc<AtomicBool>,
+    #[allow(dead_code)]
     is_ready: bool,
     http_client: reqwest::Client,
 }

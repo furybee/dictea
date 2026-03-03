@@ -1,9 +1,30 @@
+import { useEffect } from "react";
 import { useI18n, type AppLang } from "../../i18n";
 import { useUpdater } from "../../hooks/useUpdater";
+import { useAudioDevices } from "../../hooks/useAudioDevices";
 
-export function SettingsPage() {
+interface SettingsPageProps {
+  audioDevice: string;
+  setAudioDevice: (v: string) => void;
+}
+
+export function SettingsPage({ audioDevice, setAudioDevice }: SettingsPageProps) {
   const { t, lang, setLang } = useI18n();
   const { status, version, checkAndDownload, dismiss } = useUpdater();
+  const { devices, level, refreshDevices, startPreview, stopPreview } =
+    useAudioDevices();
+
+  useEffect(() => {
+    refreshDevices();
+    startPreview(audioDevice);
+    return () => {
+      stopPreview();
+    };
+  }, []);
+
+  useEffect(() => {
+    startPreview(audioDevice);
+  }, [audioDevice]);
 
   return (
     <>
@@ -48,6 +69,31 @@ export function SettingsPage() {
           <option value="fr">Francais</option>
           <option value="en">English</option>
         </select>
+      </div>
+
+      <div className="settings-section">
+        <h2>{t("audio_device")}</h2>
+        <p className="hint">{t("audio_device_hint")}</p>
+        <div className="device-select-row">
+          <select
+            className="settings-select"
+            value={audioDevice}
+            onChange={(e) => setAudioDevice(e.target.value)}
+          >
+            <option value="">{t("audio_device_default")}</option>
+            {devices.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <div className="volume-meter">
+            <div
+              className="volume-meter-fill"
+              style={{ width: `${level * 100}%` }}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="settings-section">

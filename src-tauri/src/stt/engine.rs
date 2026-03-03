@@ -6,6 +6,7 @@ use thiserror::Error;
 #[derive(Debug, Clone)]
 pub enum SttEvent {
     /// Partial transcription (may be rewritten)
+    #[allow(dead_code)]
     Partial(String),
     /// Final transcription (definitive)
     Final(String),
@@ -65,6 +66,7 @@ impl Language {
 /// STT engine errors
 #[derive(Error, Debug)]
 pub enum SttError {
+    #[allow(dead_code)]
     #[error("Model load error: {0}")]
     ModelLoadError(String),
 
@@ -74,9 +76,11 @@ pub enum SttError {
     #[error("Inference error: {0}")]
     InferenceError(String),
 
+    #[allow(dead_code)]
     #[error("Invalid audio format: {0}")]
     InvalidAudioFormat(String),
 
+    #[allow(dead_code)]
     #[error("Engine not initialized")]
     NotInitialized,
 }
@@ -84,6 +88,7 @@ pub enum SttError {
 /// Main trait for STT engines
 ///
 /// Each implementation (Voxtral, OpenAI) must implement this trait.
+#[allow(dead_code)]
 pub trait SttEngine: Send + Sync {
     /// Load the model from the specified path
     fn load(model_path: &str) -> Result<Self, SttError>

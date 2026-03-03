@@ -41,8 +41,6 @@ export function SettingsView() {
               setOutputLanguage={config.setOutputLanguage}
               reformulate={config.reformulate}
               setReformulate={config.setReformulate}
-              audioDevice={config.audioDevice}
-              setAudioDevice={config.setAudioDevice}
             />
           )}
 
@@ -61,7 +59,12 @@ export function SettingsView() {
 
           {activePage === "shortcut" && <ShortcutPage />}
 
-          {activePage === "settings" && <SettingsPage />}
+          {activePage === "settings" && (
+            <SettingsPage
+              audioDevice={config.audioDevice}
+              setAudioDevice={config.setAudioDevice}
+            />
+          )}
         </div>
       </main>
     </div>
