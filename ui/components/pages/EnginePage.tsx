@@ -7,6 +7,8 @@ interface EnginePageProps {
   setMistralApiKey: (v: string) => void;
   geminiApiKey: string;
   setGeminiApiKey: (v: string) => void;
+  groqApiKey: string;
+  setGroqApiKey: (v: string) => void;
   sttEngine: string;
   setSttEngine: (v: string) => void;
 }
@@ -18,52 +20,41 @@ export function EnginePage({
   setMistralApiKey,
   geminiApiKey,
   setGeminiApiKey,
+  groqApiKey,
+  setGroqApiKey,
   sttEngine,
   setSttEngine,
 }: EnginePageProps) {
   const { t } = useI18n();
 
-  const apiKeyLabel =
-    sttEngine === "voxtral"
-      ? t("api_key_mistral")
-      : sttEngine === "gemini"
-        ? t("api_key_gemini")
-        : t("api_key");
+  const engineConfig: Record<string, {
+    label: string; hint: string; key: string;
+    setKey: (v: string) => void; placeholder: string;
+    transcription: string; reformulation: string;
+  }> = {
+    openai: {
+      label: t("api_key"), hint: t("api_key_hint"),
+      key: apiKey, setKey: setApiKey, placeholder: "sk-...",
+      transcription: "gpt-4o-transcribe", reformulation: "gpt-4o-mini",
+    },
+    voxtral: {
+      label: t("api_key_mistral"), hint: t("api_key_mistral_hint"),
+      key: mistralApiKey, setKey: setMistralApiKey, placeholder: "",
+      transcription: "voxtral-mini-latest", reformulation: "mistral-small-latest",
+    },
+    gemini: {
+      label: t("api_key_gemini"), hint: t("api_key_gemini_hint"),
+      key: geminiApiKey, setKey: setGeminiApiKey, placeholder: "",
+      transcription: "gemini-2.5-flash", reformulation: "gemini-2.5-flash-lite",
+    },
+    groq: {
+      label: t("api_key_groq"), hint: t("api_key_groq_hint"),
+      key: groqApiKey, setKey: setGroqApiKey, placeholder: "gsk_...",
+      transcription: "whisper-large-v3-turbo", reformulation: "llama-3.3-70b-versatile",
+    },
+  };
 
-  const apiKeyHint =
-    sttEngine === "voxtral"
-      ? t("api_key_mistral_hint")
-      : sttEngine === "gemini"
-        ? t("api_key_gemini_hint")
-        : t("api_key_hint");
-
-  const currentApiKey =
-    sttEngine === "voxtral"
-      ? mistralApiKey
-      : sttEngine === "gemini"
-        ? geminiApiKey
-        : apiKey;
-
-  const setCurrentApiKey =
-    sttEngine === "voxtral"
-      ? setMistralApiKey
-      : sttEngine === "gemini"
-        ? setGeminiApiKey
-        : setApiKey;
-
-  const transcriptionModel =
-    sttEngine === "voxtral"
-      ? "voxtral-mini-latest"
-      : sttEngine === "gemini"
-        ? "gemini-2.5-flash"
-        : "gpt-4o-transcribe";
-
-  const reformulationModel =
-    sttEngine === "voxtral"
-      ? "mistral-small-latest"
-      : sttEngine === "gemini"
-        ? "gemini-2.5-flash-lite"
-        : "gpt-4o-mini";
+  const current = engineConfig[sttEngine] || engineConfig.openai;
 
   return (
     <>
@@ -78,20 +69,21 @@ export function EnginePage({
           onChange={(e) => setSttEngine(e.target.value)}
         >
           <option value="openai">{t("openai_api")}</option>
+          <option value="groq">{t("groq_api")}</option>
           <option value="voxtral">{t("voxtral_api")}</option>
           <option value="gemini">{t("gemini_api")}</option>
         </select>
       </div>
 
       <div className="settings-section">
-        <h2>{apiKeyLabel}</h2>
-        <p className="hint">{apiKeyHint}</p>
+        <h2>{current.label}</h2>
+        <p className="hint">{current.hint}</p>
         <input
           type="password"
           className="settings-input"
-          value={currentApiKey}
-          onChange={(e) => setCurrentApiKey(e.target.value)}
-          placeholder={sttEngine === "openai" ? "sk-..." : ""}
+          value={current.key}
+          onChange={(e) => current.setKey(e.target.value)}
+          placeholder={current.placeholder}
         />
       </div>
 
@@ -101,11 +93,11 @@ export function EnginePage({
         <div className="models-list">
           <div className="model-item">
             <span className="model-label">{t("model_transcription")}</span>
-            <code className="model-name">{transcriptionModel}</code>
+            <code className="model-name">{current.transcription}</code>
           </div>
           <div className="model-item">
             <span className="model-label">{t("model_reformulation")}</span>
-            <code className="model-name">{reformulationModel}</code>
+            <code className="model-name">{current.reformulation}</code>
           </div>
         </div>
       </div>

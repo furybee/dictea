@@ -52,6 +52,8 @@ export function SettingsView() {
               setMistralApiKey={config.setMistralApiKey}
               geminiApiKey={config.geminiApiKey}
               setGeminiApiKey={config.setGeminiApiKey}
+              groqApiKey={config.groqApiKey}
+              setGroqApiKey={config.setGroqApiKey}
               sttEngine={config.sttEngine}
               setSttEngine={config.setSttEngine}
             />

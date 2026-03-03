@@ -4,9 +4,11 @@
 
 mod engine;
 mod gemini;
+mod groq;
 mod openai;
 mod voxtral;
 pub use engine::{SttEngine, SttEvent, SttError, Language};
 pub use gemini::GeminiEngine;
+pub use groq::GroqEngine;
 pub use openai::OpenAiEngine;
 pub use voxtral::VoxtralEngine;

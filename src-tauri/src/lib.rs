@@ -7,7 +7,7 @@ mod pipeline;
 mod stt;
 
 use audio::{AudioConfig, AudioHandle};
-use stt::{Language, GeminiEngine, OpenAiEngine, VoxtralEngine, SttEngine, SttEvent};
+use stt::{Language, GeminiEngine, GroqEngine, OpenAiEngine, VoxtralEngine, SttEngine, SttEvent};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ pub struct AppConfig {
     /// Reformulate text via GPT before pasting
     #[serde(default)]
     pub reformulate: bool,
-    /// STT engine: "openai", "voxtral", or "gemini"
+    /// STT engine: "openai", "voxtral", "gemini", or "groq"
     #[serde(default = "default_stt_engine")]
     pub stt_engine: String,
     /// Mistral API key (used when stt_engine == "voxtral")
@@ -33,6 +33,9 @@ pub struct AppConfig {
     /// Gemini API key (used when stt_engine == "gemini")
     #[serde(default)]
     pub gemini_api_key: String,
+    /// Groq API key (used when stt_engine == "groq")
+    #[serde(default)]
+    pub groq_api_key: String,
     /// Selected audio input device name (empty = system default)
     #[serde(default)]
     pub audio_device: String,
@@ -52,6 +55,7 @@ impl Default for AppConfig {
             stt_engine: "openai".to_string(),
             mistral_api_key: String::new(),
             gemini_api_key: String::new(),
+            groq_api_key: String::new(),
             audio_device: String::new(),
         }
     }
@@ -346,6 +350,15 @@ fn create_engine(config: &AppConfig) -> Result<Box<dyn SttEngine>, String> {
             tracing::info!("Voxtral STT engine initialized");
             Ok(Box::new(engine))
         }
+        "groq" => {
+            if config.groq_api_key.is_empty() {
+                return Err("Groq API key required".to_string());
+            }
+            let engine = GroqEngine::load(&config.groq_api_key)
+                .map_err(|e| format!("Groq error: {}", e))?;
+            tracing::info!("Groq Whisper API engine initialized");
+            Ok(Box::new(engine))
+        }
         _ => {
             if config.openai_api_key.is_empty() {
                 return Err("OpenAI API key required".to_string());
@@ -371,6 +384,11 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
             "https://api.mistral.ai/v1/chat/completions",
             "mistral-small-latest",
             config.mistral_api_key.as_str(),
+        ),
+        "groq" => (
+            "https://api.groq.com/openai/v1/chat/completions",
+            "llama-3.3-70b-versatile",
+            config.groq_api_key.as_str(),
         ),
         _ => (
             "https://api.openai.com/v1/chat/completions",
@@ -606,7 +624,7 @@ async fn start_recording(
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.eval("window.__overlaySetProcessing && window.__overlaySetProcessing(false)");
     }
-    tracing::info!("Recording started (OpenAI)");
+    tracing::info!("Recording started ({})", config.stt_engine);
     Ok(())
 }
 
