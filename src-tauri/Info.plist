@@ -4,5 +4,7 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Dictea needs access to the microphone for speech-to-text transcription.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Dictea needs to control System Events to paste transcribed text.</string>
 </dict>
 </plist>
