@@ -865,6 +865,7 @@ async fn toggle_overlay(app: AppHandle, state: State<'_, AppState>) -> Result<()
     } else {
         let result = start_recording(app.clone(), state, None).await;
         if let Err(ref e) = result {
+            tracing::error!("start_recording failed: {}", e);
             let _ = app.emit("config_error", e.clone());
         }
         result
@@ -966,6 +967,7 @@ pub fn run() {
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(move |_app, shortcut, event| {
+                        tracing::debug!("Shortcut event: {:?} ({:?})", shortcut, event.state);
                         if event.state == ShortcutState::Pressed {
                             let handle = app_handle.clone();
                             if shortcut == &toggle_sc {
