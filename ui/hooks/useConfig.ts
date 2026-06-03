@@ -10,6 +10,7 @@ export function useConfig() {
   const [groqApiKey, setGroqApiKey] = useState("");
   const [audioDevice, setAudioDevice] = useState("");
   const [sttEngine, setSttEngine] = useState("openai");
+  const [parakeetReformProvider, setParakeetReformProvider] = useState("openai");
   const [outputLanguage, setOutputLanguage] = useState("auto");
   const [reformulate, setReformulate] = useState(false);
   const loaded = useRef(false);
@@ -26,6 +27,7 @@ export function useConfig() {
         setGroqApiKey(appConfig.groq_api_key || "");
         setAudioDevice(appConfig.audio_device || "");
         setSttEngine(appConfig.stt_engine || "openai");
+        setParakeetReformProvider(appConfig.parakeet_reformulation_provider || "openai");
         setOutputLanguage(appConfig.output_language);
         loaded.current = true;
       } catch (e) {
@@ -48,9 +50,10 @@ export function useConfig() {
         stt_engine: sttEngine,
         output_language: outputLanguage,
         reformulate,
+        parakeet_reformulation_provider: parakeetReformProvider,
       },
     }).catch(console.error);
-  }, [config, apiKey, mistralApiKey, geminiApiKey, groqApiKey, audioDevice, sttEngine, outputLanguage, reformulate]);
+  }, [config, apiKey, mistralApiKey, geminiApiKey, groqApiKey, audioDevice, sttEngine, outputLanguage, reformulate, parakeetReformProvider]);
 
   useEffect(() => {
     if (!loaded.current) return;
@@ -71,6 +74,8 @@ export function useConfig() {
     setAudioDevice,
     sttEngine,
     setSttEngine,
+    parakeetReformProvider,
+    setParakeetReformProvider,
     outputLanguage,
     setOutputLanguage,
     reformulate,

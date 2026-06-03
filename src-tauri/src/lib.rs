@@ -40,6 +40,10 @@ pub struct AppConfig {
     /// Selected audio input device name (empty = system default)
     #[serde(default)]
     pub audio_device: String,
+    /// Chat provider for reformulation/translation when STT is local (parakeet):
+    /// "openai", "voxtral", "gemini" or "groq"
+    #[serde(default = "default_stt_engine")]
+    pub parakeet_reformulation_provider: String,
 }
 
 fn default_stt_engine() -> String {
@@ -58,6 +62,7 @@ impl Default for AppConfig {
             gemini_api_key: String::new(),
             groq_api_key: String::new(),
             audio_device: String::new(),
+            parakeet_reformulation_provider: "openai".to_string(),
         }
     }
 }
@@ -384,8 +389,14 @@ fn create_engine(config: &AppConfig, app: &AppHandle) -> Result<Box<dyn SttEngin
 
 /// Process text via chat API: reformulate and/or translate in a single call
 async fn process_text(text: &str, reformulate: bool, output_language: &str, config: &AppConfig) -> String {
-    // Determine API endpoint, model, and key based on engine
-    let (api_url, model, api_key) = match config.stt_engine.as_str() {
+    // Determine API endpoint, model, and key based on engine.
+    // Parakeet is local STT: reformulation uses the configured chat provider.
+    let provider = if config.stt_engine == "parakeet" {
+        config.parakeet_reformulation_provider.as_str()
+    } else {
+        config.stt_engine.as_str()
+    };
+    let (api_url, model, api_key) = match provider {
         "gemini" => (
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             "gemini-2.5-flash-lite",
@@ -401,8 +412,7 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
             "llama-3.3-70b-versatile",
             config.groq_api_key.as_str(),
         ),
-        // "parakeet" (local STT, no chat API) also falls through to OpenAI:
-        // text passes through unchanged if no OpenAI key is set
+        // Text passes through unchanged if no key is set for the provider
         _ => (
             "https://api.openai.com/v1/chat/completions",
             "gpt-4o-mini",

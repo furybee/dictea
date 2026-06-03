@@ -14,6 +14,8 @@ interface EnginePageProps {
   setGroqApiKey: (v: string) => void;
   sttEngine: string;
   setSttEngine: (v: string) => void;
+  parakeetReformProvider: string;
+  setParakeetReformProvider: (v: string) => void;
 }
 
 interface ParakeetModelStatus {
@@ -142,6 +144,8 @@ export function EnginePage({
   setGroqApiKey,
   sttEngine,
   setSttEngine,
+  parakeetReformProvider,
+  setParakeetReformProvider,
 }: EnginePageProps) {
   const { t } = useI18n();
 
@@ -174,6 +178,7 @@ export function EnginePage({
 
   const isParakeet = sttEngine === "parakeet";
   const current = engineConfig[sttEngine] || engineConfig.openai;
+  const reformProvider = engineConfig[parakeetReformProvider] || engineConfig.openai;
 
   return (
     <>
@@ -200,8 +205,34 @@ export function EnginePage({
           <ParakeetModelSection />
 
           <div className="settings-section">
-            <h2>{t("models_used")}</h2>
+            <h2>{t("reformulation_provider")}</h2>
             <p className="hint">{t("parakeet_reformulate_hint")}</p>
+            <select
+              className="settings-select"
+              value={parakeetReformProvider}
+              onChange={(e) => setParakeetReformProvider(e.target.value)}
+            >
+              <option value="openai">OpenAI</option>
+              <option value="groq">Groq</option>
+              <option value="voxtral">Mistral</option>
+              <option value="gemini">Gemini (Google)</option>
+            </select>
+          </div>
+
+          <div className="settings-section">
+            <h2>{reformProvider.label}</h2>
+            <p className="hint">{reformProvider.hint}</p>
+            <input
+              type="password"
+              className="settings-input"
+              value={reformProvider.key}
+              onChange={(e) => reformProvider.setKey(e.target.value)}
+              placeholder={reformProvider.placeholder}
+            />
+          </div>
+
+          <div className="settings-section">
+            <h2>{t("models_used")}</h2>
             <div className="models-list">
               <div className="model-item">
                 <span className="model-label">{t("model_transcription")}</span>
@@ -209,7 +240,7 @@ export function EnginePage({
               </div>
               <div className="model-item">
                 <span className="model-label">{t("model_reformulation")}</span>
-                <code className="model-name">gpt-4o-mini (OpenAI)</code>
+                <code className="model-name">{reformProvider.reformulation}</code>
               </div>
             </div>
           </div>

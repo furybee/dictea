@@ -56,6 +56,8 @@ export function SettingsView() {
               setGroqApiKey={config.setGroqApiKey}
               sttEngine={config.sttEngine}
               setSttEngine={config.setSttEngine}
+              parakeetReformProvider={config.parakeetReformProvider}
+              setParakeetReformProvider={config.setParakeetReformProvider}
             />
           )}
 
