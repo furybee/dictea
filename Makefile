@@ -52,13 +52,14 @@ open-settings: ## Ouvre les paramètres Accessibilité macOS
 
 release: ## Crée un tag et déclenche la release CI/CD (usage: make release VERSION=0.2.0)
 	@if [ -z "$(VERSION)" ]; then echo "$(YELLOW)Usage: make release VERSION=x.y.z$(NC)"; exit 1; fi
+	@echo "$(VERSION)" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "$(YELLOW)VERSION doit être un semver complet x.y.z (ex: 0.6.0, pas 0.6)$(NC)"; exit 1; }
 	@echo "$(GREEN)Release v$(VERSION)$(NC)"
 	@# Bump version dans Cargo.toml (line 3: version = "x.y.z")
-	@sed -i '' '3s/version = "[^"]*"/version = "$(VERSION)"/' src-tauri/Cargo.toml
+	@sed -i.bak '3s/version = "[^"]*"/version = "$(VERSION)"/' src-tauri/Cargo.toml && rm -f src-tauri/Cargo.toml.bak
 	@# Bump version dans tauri.conf.json (line 4: "version": "x.y.z")
-	@sed -i '' '4s/"version": "[^"]*"/"version": "$(VERSION)"/' src-tauri/tauri.conf.json
+	@sed -i.bak '4s/"version": "[^"]*"/"version": "$(VERSION)"/' src-tauri/tauri.conf.json && rm -f src-tauri/tauri.conf.json.bak
 	@# Bump version dans package.json (line 3: "version": "x.y.z")
-	@sed -i '' '3s/"version": "[^"]*"/"version": "$(VERSION)"/' package.json
+	@sed -i.bak '3s/"version": "[^"]*"/"version": "$(VERSION)"/' package.json && rm -f package.json.bak
 	git add src-tauri/tauri.conf.json src-tauri/Cargo.toml package.json
 	git diff --cached --quiet || git commit -m "release: v$(VERSION)"
 	@# Delete tag locally and remotely if it already exists, then recreate
