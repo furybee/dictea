@@ -15,7 +15,7 @@ Intelligent voice dictation for macOS. Press a shortcut to start, speak, press a
 
 - **Toggle dictation** — `Cmd+Shift+Space` to start recording, press again to transcribe and paste
 - **Cancel anytime** — `Cmd+Shift+C` to cancel without pasting
-- **3 STT engines** — OpenAI, Voxtral (Mistral), or Gemini (Google) — switch freely in settings
+- **5 STT engines** — OpenAI, Groq, Voxtral (Mistral), Gemini (Google), or Parakeet (100% local) — switch freely in settings
 - **AI reformulation** — Clean up grammar, remove hesitations and repetitions
 - **Auto-translation** — Translate to French, English, Spanish, German, Italian, or Portuguese
 - **Floating overlay** — Minimal animated pill with real-time audio waveform
@@ -27,8 +27,12 @@ Intelligent voice dictation for macOS. Press a shortcut to start, speak, press a
 | Engine | Transcription model | Reformulation model | API key |
 |--------|--------------------|--------------------|---------|
 | **OpenAI** | `gpt-4o-transcribe` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com/api-keys) |
+| **Groq** | `whisper-large-v3-turbo` | `llama-3.3-70b-versatile` | [console.groq.com](https://console.groq.com/keys) |
 | **Voxtral** (Mistral) | `voxtral-mini-latest` | `mistral-small-latest` | [console.mistral.ai](https://console.mistral.ai/api-keys) |
 | **Gemini** (Google) | `gemini-2.5-flash` | `gemini-2.5-flash-lite` | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| **Parakeet** (NVIDIA, local) | `parakeet-tdt-0.6b-v3` via ONNX Runtime | `gpt-4o-mini` (optional, OpenAI key) | none — model (~670 MB) downloaded from the settings |
+
+**Parakeet** runs 100% locally: no audio ever leaves your machine. It supports 25 European languages with automatic language detection. Reformulation/translation still require an OpenAI API key (text is pasted as-is otherwise).
 
 ## Installation
 
@@ -82,7 +86,7 @@ The `.dmg` and `.app` bundle will be in `src-tauri/target/release/bundle/`.
 src-tauri/src/
 ├── lib.rs              # App state, Tauri commands, config, shortcuts
 ├── audio/              # Microphone capture (cpal, 48kHz → 16kHz)
-├── stt/                # STT engines (OpenAI, Voxtral, Gemini)
+├── stt/                # STT engines (OpenAI, Groq, Voxtral, Gemini, Parakeet)
 └── pipeline/           # Real-time streaming pipeline
 
 ui/

@@ -3,11 +3,12 @@
 //! Global shortcut to activate voice dictation.
 
 mod audio;
+mod models;
 mod pipeline;
 mod stt;
 
 use audio::{AudioConfig, AudioHandle};
-use stt::{Language, GeminiEngine, GroqEngine, OpenAiEngine, VoxtralEngine, SttEngine, SttEvent};
+use stt::{Language, GeminiEngine, GroqEngine, OpenAiEngine, ParakeetEngine, VoxtralEngine, SttEngine, SttEvent};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -330,8 +331,18 @@ async fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfi
 }
 
 /// Create the STT engine based on config
-fn create_engine(config: &AppConfig) -> Result<Box<dyn SttEngine>, String> {
+fn create_engine(config: &AppConfig, app: &AppHandle) -> Result<Box<dyn SttEngine>, String> {
     match config.stt_engine.as_str() {
+        "parakeet" => {
+            let model_dir = models::parakeet_model_dir(app);
+            if !stt::parakeet::is_model_downloaded(&model_dir) {
+                return Err("Parakeet model not downloaded. Configure it in Settings > Engine.".to_string());
+            }
+            let engine = ParakeetEngine::load(&model_dir.to_string_lossy())
+                .map_err(|e| format!("Parakeet error: {}", e))?;
+            tracing::info!("Parakeet local STT engine initialized");
+            Ok(Box::new(engine))
+        }
         "gemini" => {
             if config.gemini_api_key.is_empty() {
                 return Err("Gemini API key required".to_string());
@@ -390,6 +401,8 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
             "llama-3.3-70b-versatile",
             config.groq_api_key.as_str(),
         ),
+        // "parakeet" (local STT, no chat API) also falls through to OpenAI:
+        // text passes through unchanged if no OpenAI key is set
         _ => (
             "https://api.openai.com/v1/chat/completions",
             "gpt-4o-mini",
@@ -504,7 +517,7 @@ async fn start_recording(
     {
         let mut pipeline_guard = state.pipeline.lock().await;
         if pipeline_guard.is_none() {
-            let engine = create_engine(&config)?;
+            let engine = create_engine(&config, &app)?;
             *pipeline_guard = Some(TranscriptionPipeline::new(engine));
         }
     }
@@ -912,6 +925,9 @@ pub fn run() {
             get_transcription_state,
             toggle_overlay,
             cancel_recording,
+            models::parakeet_model_status,
+            models::download_parakeet_model,
+            models::delete_parakeet_model,
         ])
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};

@@ -1,3 +1,6 @@
+import { useState, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "../../i18n";
 
 interface EnginePageProps {
@@ -11,6 +14,121 @@ interface EnginePageProps {
   setGroqApiKey: (v: string) => void;
   sttEngine: string;
   setSttEngine: (v: string) => void;
+}
+
+interface ParakeetModelStatus {
+  downloaded: boolean;
+  downloading: boolean;
+  path: string;
+}
+
+interface DownloadProgress {
+  file: string;
+  file_index: number;
+  file_count: number;
+  downloaded: number;
+  total: number;
+}
+
+function formatMB(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(0);
+}
+
+function ParakeetModelSection() {
+  const { t } = useI18n();
+  const [status, setStatus] = useState<ParakeetModelStatus | null>(null);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    invoke<ParakeetModelStatus>("parakeet_model_status")
+      .then(setStatus)
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const unlistenProgress = listen<DownloadProgress>("parakeet_download_progress", (e) => {
+      setProgress(e.payload);
+    });
+    const unlistenDone = listen("parakeet_download_done", () => {
+      setProgress(null);
+      refresh();
+    });
+    const unlistenError = listen<string>("parakeet_download_error", (e) => {
+      setProgress(null);
+      setError(e.payload);
+      refresh();
+    });
+    return () => {
+      unlistenProgress.then((fn) => fn());
+      unlistenDone.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }, [refresh]);
+
+  const startDownload = () => {
+    setError(null);
+    setStatus((s) => (s ? { ...s, downloading: true } : s));
+    invoke("download_parakeet_model").catch((e) => {
+      setError(String(e));
+      refresh();
+    });
+  };
+
+  const deleteModel = () => {
+    invoke("delete_parakeet_model")
+      .then(refresh)
+      .catch((e) => setError(String(e)));
+  };
+
+  const percent =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : 0;
+
+  return (
+    <div className="settings-section">
+      <h2>{t("parakeet_model")}</h2>
+      <p className="hint">{t("parakeet_model_hint")}</p>
+
+      {status?.downloading ? (
+        <div className="model-download">
+          <div className="model-status-row">
+            <span className="model-status-text">
+              {t("downloading_model")} ({progress ? `${progress.file_index}/${progress.file_count}` : "..."})
+              {progress && progress.total > 0 && (
+                <> — {formatMB(progress.downloaded)} / {formatMB(progress.total)} Mo</>
+              )}
+            </span>
+          </div>
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${percent}%` }} />
+          </div>
+        </div>
+      ) : status?.downloaded ? (
+        <div className="model-status-row">
+          <span className="model-status-badge model-status-ok">✓ {t("model_downloaded")}</span>
+          <button className="btn-secondary" onClick={deleteModel}>
+            {t("delete_model")}
+          </button>
+        </div>
+      ) : (
+        <div className="model-status-row">
+          <span className="model-status-text">{t("model_not_downloaded")}</span>
+          <button className="btn-primary" onClick={startDownload}>
+            {t("download_model")}
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <p className="model-error">
+          {t("download_error")}: {error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function EnginePage({
@@ -54,6 +172,7 @@ export function EnginePage({
     },
   };
 
+  const isParakeet = sttEngine === "parakeet";
   const current = engineConfig[sttEngine] || engineConfig.openai;
 
   return (
@@ -72,35 +191,59 @@ export function EnginePage({
           <option value="groq">{t("groq_api")}</option>
           <option value="voxtral">{t("voxtral_api")}</option>
           <option value="gemini">{t("gemini_api")}</option>
+          <option value="parakeet">{t("parakeet_api")}</option>
         </select>
       </div>
 
-      <div className="settings-section">
-        <h2>{current.label}</h2>
-        <p className="hint">{current.hint}</p>
-        <input
-          type="password"
-          className="settings-input"
-          value={current.key}
-          onChange={(e) => current.setKey(e.target.value)}
-          placeholder={current.placeholder}
-        />
-      </div>
+      {isParakeet ? (
+        <>
+          <ParakeetModelSection />
 
-      <div className="settings-section">
-        <h2>{t("models_used")}</h2>
-        <p className="hint">{t("models_used_hint")}</p>
-        <div className="models-list">
-          <div className="model-item">
-            <span className="model-label">{t("model_transcription")}</span>
-            <code className="model-name">{current.transcription}</code>
+          <div className="settings-section">
+            <h2>{t("models_used")}</h2>
+            <p className="hint">{t("parakeet_reformulate_hint")}</p>
+            <div className="models-list">
+              <div className="model-item">
+                <span className="model-label">{t("model_transcription")}</span>
+                <code className="model-name">parakeet-tdt-0.6b-v3 (local)</code>
+              </div>
+              <div className="model-item">
+                <span className="model-label">{t("model_reformulation")}</span>
+                <code className="model-name">gpt-4o-mini (OpenAI)</code>
+              </div>
+            </div>
           </div>
-          <div className="model-item">
-            <span className="model-label">{t("model_reformulation")}</span>
-            <code className="model-name">{current.reformulation}</code>
+        </>
+      ) : (
+        <>
+          <div className="settings-section">
+            <h2>{current.label}</h2>
+            <p className="hint">{current.hint}</p>
+            <input
+              type="password"
+              className="settings-input"
+              value={current.key}
+              onChange={(e) => current.setKey(e.target.value)}
+              placeholder={current.placeholder}
+            />
           </div>
-        </div>
-      </div>
+
+          <div className="settings-section">
+            <h2>{t("models_used")}</h2>
+            <p className="hint">{t("models_used_hint")}</p>
+            <div className="models-list">
+              <div className="model-item">
+                <span className="model-label">{t("model_transcription")}</span>
+                <code className="model-name">{current.transcription}</code>
+              </div>
+              <div className="model-item">
+                <span className="model-label">{t("model_reformulation")}</span>
+                <code className="model-name">{current.reformulation}</code>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
