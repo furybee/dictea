@@ -809,6 +809,40 @@ body {
   }
 }
 
+/* Alert banner (a failure the user has to act on) */
+.alert-banner {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.alert-banner-text strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  color: #fca5a5;
+}
+
+.alert-banner-text p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  opacity: 0.8;
+}
+
+.alert-banner-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 /* Error state (transcription failed) */
 .overlay-pill.error {
   box-shadow:
