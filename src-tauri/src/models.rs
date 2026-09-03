@@ -72,6 +72,8 @@ pub async fn download_parakeet_model(app: AppHandle) -> Result<(), String> {
         Ok(_) => {
             tracing::info!("Parakeet model download complete");
             let _ = app.emit("parakeet_download_done", ());
+            // The model is usable right away: start loading it in the background
+            crate::warm_local_engine(&app);
         }
         Err(e) => {
             tracing::error!("Parakeet model download failed: {}", e);
@@ -164,6 +166,8 @@ pub fn delete_parakeet_model(app: AppHandle) -> Result<(), String> {
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| format!("Delete error: {}", e))?;
         tracing::info!("Parakeet model deleted ({})", dir.display());
+        // Drop the engine still holding the deleted model
+        crate::reset_engine(&app);
     }
     Ok(())
 }

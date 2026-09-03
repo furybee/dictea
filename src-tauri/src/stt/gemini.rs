@@ -187,6 +187,9 @@ impl GeminiEngine {
                     }
                     Err(e) => {
                         tracing::error!("Gemini error: {}", e);
+                        if let Ok(mut events) = shared_events.lock() {
+                            events.push_back(SttEvent::Error(format!("Gemini: {}", e)));
+                        }
                     }
                 }
                 pending.store(false, Ordering::SeqCst);

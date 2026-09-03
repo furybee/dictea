@@ -170,6 +170,9 @@ impl GroqEngine {
                     }
                     Err(e) => {
                         tracing::error!("Groq error: {}", e);
+                        if let Ok(mut events) = shared_events.lock() {
+                            events.push_back(SttEvent::Error(format!("Groq: {}", e)));
+                        }
                     }
                 }
                 pending.store(false, Ordering::SeqCst);

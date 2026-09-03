@@ -10,6 +10,8 @@ pub enum SttEvent {
     Partial(String),
     /// Final transcription (definitive)
     Final(String),
+    /// Transcription failed — surfaced to the user instead of failing silently
+    Error(String),
 }
 
 /// Supported languages for transcription

@@ -809,6 +809,41 @@ body {
   }
 }
 
+/* Error state (transcription failed) */
+.overlay-pill.error {
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.5),
+    0 0 30px rgba(239, 68, 68, 0.2),
+    0 0 60px rgba(239, 68, 68, 0.1);
+}
+
+.overlay-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(248, 113, 113, 0.8);
+  color: #fca5a5;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.35);
+  animation: error-appear 0.25s ease-out;
+}
+
+@keyframes error-appear {
+  from {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 /* ============================================
    SCROLLBAR
    ============================================ */

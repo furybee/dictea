@@ -203,6 +203,8 @@ pub struct AppState {
     stopping: Arc<AtomicBool>,
     /// Mic preview handle for settings UI
     mic_preview: Arc<Mutex<Option<AudioHandle>>>,
+    /// Last STT error of the current dictation (cleared on each start)
+    last_error: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -213,6 +215,7 @@ impl AppState {
             transcription: Arc::new(RwLock::new(TranscriptionState::default())),
             stopping: Arc::new(AtomicBool::new(false)),
             mic_preview: Arc::new(Mutex::new(None)),
+            last_error: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -322,8 +325,10 @@ async fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfi
     // Save to disk
     config.save(&app);
 
-    let mut current = state.config.write().await;
-    *current = config;
+    {
+        let mut current = state.config.write().await;
+        *current = config;
+    }
 
     // Reset pipeline to use the new engine/model
     let mut pipeline = state.pipeline.lock().await;
@@ -331,6 +336,10 @@ async fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfi
         p.stop();
     }
     *pipeline = None;
+    drop(pipeline);
+
+    // Start loading the local model right away if it was just selected
+    warm_local_engine(&app);
 
     Ok(())
 }
@@ -385,6 +394,47 @@ fn create_engine(config: &AppConfig, app: &AppHandle) -> Result<Box<dyn SttEngin
             Ok(Box::new(engine))
         }
     }
+}
+
+/// Pre-create the local engine in the background so the first dictation doesn't
+/// pay for the ONNX model load (a few seconds). No-op for the API engines,
+/// which have nothing to load.
+pub(crate) fn warm_local_engine(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let config = state.config.read().await.clone();
+        if config.stt_engine != "parakeet" {
+            return;
+        }
+
+        let mut pipeline = state.pipeline.lock().await;
+        if pipeline.is_some() {
+            return;
+        }
+        match create_engine(&config, &app) {
+            // ParakeetEngine::load returns immediately, the ONNX session
+            // finishes loading on its own thread.
+            Ok(engine) => {
+                *pipeline = Some(TranscriptionPipeline::new(engine));
+                tracing::info!("Parakeet engine pre-loading in background");
+            }
+            Err(e) => tracing::warn!("Parakeet pre-load skipped: {}", e),
+        }
+    });
+}
+
+/// Drop the current engine, e.g. after the local model has been deleted
+pub(crate) fn reset_engine(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let mut pipeline = state.pipeline.lock().await;
+        if let Some(ref mut p) = *pipeline {
+            p.stop();
+        }
+        *pipeline = None;
+    });
 }
 
 /// Process text via chat API: reformulate and/or translate in a single call
@@ -507,6 +557,20 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
     }
 }
 
+/// Record an STT error and surface it to the user (toast + overlay)
+async fn report_stt_error(
+    app: &AppHandle,
+    last_error: &Arc<Mutex<Option<String>>>,
+    message: String,
+) {
+    tracing::error!("STT error: {}", message);
+    {
+        let mut guard = last_error.lock().await;
+        *guard = Some(message.clone());
+    }
+    let _ = app.emit("stt_error", message);
+}
+
 /// Start recording
 #[tauri::command]
 async fn start_recording(
@@ -539,6 +603,10 @@ async fn start_recording(
         trans.partial_text.clear();
         trans.final_text.clear();
     }
+    {
+        let mut last_error = state.last_error.lock().await;
+        *last_error = None;
+    }
 
     // Start the pipeline
     {
@@ -549,22 +617,27 @@ async fn start_recording(
             let mut receiver = pipeline.subscribe();
             let app_handle = app.clone();
             let transcription = state.transcription.clone();
+            let last_error = state.last_error.clone();
 
             tokio::spawn(async move {
                 while let Ok(event) = receiver.recv().await {
-                    let mut trans = transcription.write().await;
                     match event {
                         SttEvent::Partial(text) => {
+                            let mut trans = transcription.write().await;
                             trans.partial_text = text.clone();
                             let _ = app_handle.emit("stt_partial", text);
                         }
                         SttEvent::Final(text) => {
+                            let mut trans = transcription.write().await;
                             if !trans.final_text.is_empty() {
                                 trans.final_text.push(' ');
                             }
                             trans.final_text.push_str(&text);
                             trans.partial_text.clear();
                             let _ = app_handle.emit("stt_final", text);
+                        }
+                        SttEvent::Error(message) => {
+                            report_stt_error(&app_handle, &last_error, message).await;
                         }
                     }
                 }
@@ -646,6 +719,7 @@ async fn start_recording(
     let _ = app.emit("recording_started", ());
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.eval("window.__overlaySetProcessing && window.__overlaySetProcessing(false)");
+        let _ = overlay.eval("window.__overlaySetError && window.__overlaySetError(false)");
     }
     tracing::info!("Recording started ({})", config.stt_engine);
     Ok(())
@@ -661,6 +735,8 @@ async fn stop_recording_internal(app: AppHandle, state: State<'_, AppState>) -> 
             Vec::new()
         }
     };
+
+    let mut errors = Vec::new();
 
     let final_text = {
         let mut trans = state.transcription.write().await;
@@ -678,6 +754,7 @@ async fn stop_recording_internal(app: AppHandle, state: State<'_, AppState>) -> 
                     trans.final_text.push_str(&text);
                     trans.partial_text.clear();
                 }
+                SttEvent::Error(message) => errors.push(message),
             }
         }
 
@@ -690,6 +767,10 @@ async fn stop_recording_internal(app: AppHandle, state: State<'_, AppState>) -> 
         }
         text.trim().to_string()
     };
+
+    for message in errors {
+        report_stt_error(&app, &state.last_error, message).await;
+    }
 
     let _ = app.emit("recording_stopped", final_text.clone());
     tracing::info!("Recording stopped, text: {}", final_text);
@@ -730,7 +811,21 @@ async fn do_stop_and_paste(app: AppHandle, state: State<'_, AppState>) -> Result
     let text = stop_recording_internal(app.clone(), state.clone()).await?;
 
     if text.is_empty() {
-        tracing::info!("No text to paste");
+        let error = state.last_error.lock().await.clone();
+        match error {
+            // Transcription failed: flash the pill red so the failure isn't silent
+            Some(message) => {
+                tracing::warn!("Dictation failed without text: {}", message);
+                if let Some(overlay) = app.get_webview_window("overlay") {
+                    let _ = overlay.eval("window.__overlaySetError && window.__overlaySetError(true)");
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+                if let Some(overlay) = app.get_webview_window("overlay") {
+                    let _ = overlay.eval("window.__overlaySetError && window.__overlaySetError(false)");
+                }
+            }
+            None => tracing::info!("No text to paste"),
+        }
         hide_overlay_and_refocus(&app);
         return Ok(());
     }
@@ -952,6 +1047,9 @@ pub fn run() {
                 *c = saved_config;
             });
 
+            // Local engine: start loading the model now, not on first dictation
+            warm_local_engine(app.handle());
+
             let app_handle = app.handle().clone();
 
             let toggle_shortcut: Shortcut = "CmdOrCtrl+Shift+Space"
@@ -967,7 +1065,7 @@ pub fn run() {
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(move |_app, shortcut, event| {
-                        tracing::debug!("Shortcut event: {:?} ({:?})", shortcut, event.state);
+                        tracing::trace!("Shortcut event: {:?} ({:?})", shortcut, event.state);
                         if event.state == ShortcutState::Pressed {
                             let handle = app_handle.clone();
                             if shortcut == &toggle_sc {

@@ -173,6 +173,9 @@ impl OpenAiEngine {
                     }
                     Err(e) => {
                         tracing::error!("OpenAI error: {}", e);
+                        if let Ok(mut events) = shared_events.lock() {
+                            events.push_back(SttEvent::Error(format!("OpenAI: {}", e)));
+                        }
                     }
                 }
                 pending.store(false, Ordering::SeqCst);

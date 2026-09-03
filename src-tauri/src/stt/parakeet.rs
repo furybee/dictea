@@ -120,6 +120,9 @@ impl ParakeetEngine {
                 }
                 Err(e) => {
                     tracing::error!("Parakeet error: {}", e);
+                    if let Ok(mut events) = shared_events.lock() {
+                        events.push_back(SttEvent::Error(format!("Parakeet: {}", e)));
+                    }
                 }
             }
             pending.store(false, Ordering::SeqCst);

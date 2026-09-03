@@ -15,11 +15,15 @@ export function SettingsView() {
   const { showToast } = useToast();
 
   useEffect(() => {
-    const unlisten = listen<string>("config_error", (event) => {
+    const unlistenConfig = listen<string>("config_error", (event) => {
+      showToast(event.payload);
+    });
+    const unlistenStt = listen<string>("stt_error", (event) => {
       showToast(event.payload);
     });
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenConfig.then((fn) => fn());
+      unlistenStt.then((fn) => fn());
     };
   }, [showToast]);
 

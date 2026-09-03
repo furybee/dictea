@@ -173,6 +173,9 @@ impl VoxtralEngine {
                     }
                     Err(e) => {
                         tracing::error!("Voxtral error: {}", e);
+                        if let Ok(mut events) = shared_events.lock() {
+                            events.push_back(SttEvent::Error(format!("Voxtral: {}", e)));
+                        }
                     }
                 }
                 pending.store(false, Ordering::SeqCst);
