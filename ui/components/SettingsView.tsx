@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { useI18n } from "../i18n";
 import { Sidebar } from "./Sidebar";
 import { DictationPage } from "./pages/DictationPage";
 import { EnginePage } from "./pages/EnginePage";
@@ -11,8 +13,10 @@ import { PAGE_GLOW_COLORS, type Page } from "../types";
 
 export function SettingsView() {
   const [activePage, setActivePage] = useState<Page>("dictation");
+  const [pasteFailed, setPasteFailed] = useState(false);
   const config = useConfig();
   const { showToast } = useToast();
+  const { t } = useI18n();
 
   useEffect(() => {
     const unlistenConfig = listen<string>("config_error", (event) => {
@@ -21,9 +25,14 @@ export function SettingsView() {
     const unlistenStt = listen<string>("stt_error", (event) => {
       showToast(event.payload);
     });
+    // Needs an action from the user, so a 3s toast will not do
+    const unlistenPaste = listen("paste_failed", () => {
+      setPasteFailed(true);
+    });
     return () => {
       unlistenConfig.then((fn) => fn());
       unlistenStt.then((fn) => fn());
+      unlistenPaste.then((fn) => fn());
     };
   }, [showToast]);
 
@@ -39,6 +48,25 @@ export function SettingsView() {
         <div className="bg-blob bg-blob-1" />
         <div className="bg-blob bg-blob-2" />
         <div className="main-inner">
+          {pasteFailed && (
+            <div className="alert-banner">
+              <div className="alert-banner-text">
+                <strong>{t("paste_failed_title")}</strong>
+                <p>{t("paste_failed_body")}</p>
+              </div>
+              <div className="alert-banner-actions">
+                <button
+                  className="btn-primary"
+                  onClick={() => invoke("open_accessibility_settings").catch(console.error)}
+                >
+                  {t("paste_failed_action")}
+                </button>
+                <button className="btn-secondary" onClick={() => setPasteFailed(false)}>
+                  {t("dismiss")}
+                </button>
+              </div>
+            </div>
+          )}
           {activePage === "dictation" && (
             <DictationPage
               outputLanguage={config.outputLanguage}

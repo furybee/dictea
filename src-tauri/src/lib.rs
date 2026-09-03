@@ -574,6 +574,33 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
     }
 }
 
+/// The automatic paste failed. The text is safe in the clipboard, but nothing
+/// appeared where the user was typing and nothing tells them why.
+///
+/// On macOS this is nearly always TCC: the app is ad-hoc signed, so its code
+/// identity changes with every build, and an update invalidates the
+/// Accessibility grant. The microphone re-prompts, Accessibility never does —
+/// it just silently denies. So bring the window up and explain.
+fn report_paste_failure(app: &AppHandle) {
+    tracing::warn!("Automatic paste failed, text left in clipboard");
+    let _ = app.emit("paste_failed", ());
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.show();
+        let _ = main.set_focus();
+    }
+}
+
+/// Open the OS pane where the paste permission is granted
+#[tauri::command]
+fn open_accessibility_settings() {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            .spawn();
+    }
+}
+
 /// Record an STT error and surface it to the user (toast + overlay)
 async fn report_stt_error(
     app: &AppHandle,
@@ -908,12 +935,12 @@ async fn do_stop_and_paste(app: AppHandle, state: State<'_, AppState>) -> Result
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     tracing::error!("osascript error: {}", stderr);
-                    tracing::info!("Text is in clipboard, paste with Cmd+V");
+                    report_paste_failure(&app);
                 }
             }
             Err(e) => {
                 tracing::error!("osascript launch error: {}", e);
-                tracing::info!("Text is in clipboard, paste with Cmd+V");
+                report_paste_failure(&app);
             }
         }
     }
@@ -930,7 +957,7 @@ async fn do_stop_and_paste(app: AppHandle, state: State<'_, AppState>) -> Result
             }
             Err(e) => {
                 tracing::error!("enigo error: {}", e);
-                tracing::info!("Text is in clipboard, paste with Ctrl+V");
+                report_paste_failure(&app);
             }
         }
     }
@@ -948,12 +975,12 @@ async fn do_stop_and_paste(app: AppHandle, state: State<'_, AppState>) -> Result
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     tracing::error!("xdotool error: {}", stderr);
-                    tracing::info!("Text is in clipboard, paste with Ctrl+V");
+                    report_paste_failure(&app);
                 }
             }
             Err(e) => {
                 tracing::error!("xdotool launch error: {}", e);
-                tracing::info!("Text is in clipboard, paste with Ctrl+V");
+                report_paste_failure(&app);
             }
         }
     }
@@ -1056,6 +1083,7 @@ pub fn run() {
             get_transcription_state,
             toggle_overlay,
             cancel_recording,
+            open_accessibility_settings,
             models::parakeet_model_status,
             models::download_parakeet_model,
             models::cancel_parakeet_download,

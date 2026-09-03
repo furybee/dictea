@@ -67,6 +67,10 @@ export const translations = {
     delete_model: "Supprimer le modele",
     download_error: "Erreur de telechargement",
     cancel_download: "Annuler",
+    paste_failed_title: "Le collage automatique a echoue",
+    paste_failed_body: "Votre texte est dans le presse-papier : collez-le avec Cmd+V. Apres une mise a jour, macOS revoque l'autorisation d'Accessibilite de Dictea sans le signaler. Dans les reglages, retirez Dictea de la liste puis rajoutez-le.",
+    paste_failed_action: "Ouvrir les reglages Accessibilite",
+    dismiss: "Fermer",
   },
   en: {
     subtitle: "Voice dictation",
@@ -136,6 +140,10 @@ export const translations = {
     delete_model: "Delete model",
     download_error: "Download error",
     cancel_download: "Cancel",
+    paste_failed_title: "Automatic paste failed",
+    paste_failed_body: "Your text is in the clipboard: paste it with Cmd+V. After an update, macOS silently revokes Dictea's Accessibility permission. In the settings, remove Dictea from the list and add it back.",
+    paste_failed_action: "Open Accessibility settings",
+    dismiss: "Dismiss",
   },
 } as const;
 
