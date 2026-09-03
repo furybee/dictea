@@ -38,7 +38,7 @@ reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
 futures-util = "0.3"
 
 # STT local NVIDIA Parakeet (ONNX Runtime)
-parakeet-rs = "0.3"
+parakeet-rs = "0.3.7"
 
 # Encodage audio WAV
 hound = "3.5"
