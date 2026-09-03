@@ -71,6 +71,9 @@ export const translations = {
     paste_failed_body: "Votre texte est dans le presse-papier : collez-le avec Cmd+V. Apres une mise a jour, macOS revoque l'autorisation d'Accessibilite de Dictea sans le signaler. Dans les reglages, retirez Dictea de la liste puis rajoutez-le.",
     paste_failed_action: "Ouvrir les reglages Accessibilite",
     dismiss: "Fermer",
+    apple_intelligence: "Apple Intelligence (sur l'appareil)",
+    apple_intelligence_hint: "Reformulation par le modele integre a macOS. Rien ne quitte votre machine, aucune cle API. Combine avec Parakeet, la dictee est entierement locale.",
+    apple_unavailable_note: "Si le modele est indisponible, la transcription est collee telle quelle : elle n'est jamais envoyee a un service en ligne.",
   },
   en: {
     subtitle: "Voice dictation",
@@ -144,6 +147,9 @@ export const translations = {
     paste_failed_body: "Your text is in the clipboard: paste it with Cmd+V. After an update, macOS silently revokes Dictea's Accessibility permission. In the settings, remove Dictea from the list and add it back.",
     paste_failed_action: "Open Accessibility settings",
     dismiss: "Dismiss",
+    apple_intelligence: "Apple Intelligence (on-device)",
+    apple_intelligence_hint: "Reformulation by the model built into macOS. Nothing leaves your machine, no API key. Paired with Parakeet, the whole dictation stays local.",
+    apple_unavailable_note: "If the model is unavailable, the transcription is pasted as-is: it is never sent to an online service.",
   },
 } as const;
 

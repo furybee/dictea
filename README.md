@@ -34,6 +34,12 @@ Intelligent voice dictation for macOS. Press a shortcut to start, speak, press a
 
 **Parakeet** runs 100% locally: no audio ever leaves your machine. It supports 25 European languages with automatic language detection. The model is loaded at startup so the first dictation is instant. Reformulation and translation stay optional — pick any chat provider in the settings, or leave its key empty and the transcription is pasted as-is (still fully local).
 
+### Fully local dictation (macOS 26+)
+
+Pairing **Parakeet** with **Apple Intelligence** as the reformulation provider keeps the entire pipeline on the machine — audio and text alike, no API key, no network. It uses the model built into macOS through the `FoundationModels` framework, so there is nothing extra to download.
+
+It needs macOS 26 or later on a device with Apple Intelligence enabled; the option is hidden elsewhere. If the model turns out to be unavailable at dictation time, the raw transcription is pasted and the reason is shown — it is never quietly sent to an online service instead.
+
 ## Installation
 
 Download the latest release from [GitHub Releases](https://github.com/furybee/dictea/releases).

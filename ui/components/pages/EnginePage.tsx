@@ -36,6 +36,29 @@ function formatMB(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(0);
 }
 
+interface AppleStatus {
+  availability: string;
+  message: string;
+}
+
+function AppleIntelligenceSection({ status }: { status: AppleStatus | null }) {
+  const { t } = useI18n();
+  const ready = status?.availability === "available";
+
+  return (
+    <div className="settings-section">
+      <h2>{t("apple_intelligence")}</h2>
+      <p className="hint">{t("apple_intelligence_hint")}</p>
+      <div className="model-status-row">
+        <span className={`model-status-badge${ready ? " model-status-ok" : " model-status-warn"}`}>
+          {ready ? "✓" : "!"} {status?.message ?? "…"}
+        </span>
+      </div>
+      {!ready && <p className="hint">{t("apple_unavailable_note")}</p>}
+    </div>
+  );
+}
+
 function ParakeetModelSection() {
   const { t } = useI18n();
   const [status, setStatus] = useState<ParakeetModelStatus | null>(null);
@@ -160,6 +183,18 @@ export function EnginePage({
   setParakeetReformProvider,
 }: EnginePageProps) {
   const { t } = useI18n();
+  const [appleStatus, setAppleStatus] = useState<AppleStatus | null>(null);
+
+  useEffect(() => {
+    invoke<AppleStatus>("apple_intelligence_status")
+      .then(setAppleStatus)
+      .catch(console.error);
+  }, []);
+
+  // Hide the option entirely off macOS rather than offer something that
+  // can never work there
+  const appleSupported = appleStatus !== null && appleStatus.availability !== "unsupported_os";
+  const isApple = parakeetReformProvider === "apple";
 
   const engineConfig: Record<string, {
     label: string; hint: string; key: string;
@@ -224,6 +259,7 @@ export function EnginePage({
               value={parakeetReformProvider}
               onChange={(e) => setParakeetReformProvider(e.target.value)}
             >
+              {appleSupported && <option value="apple">{t("apple_intelligence")}</option>}
               <option value="openai">OpenAI</option>
               <option value="groq">Groq</option>
               <option value="voxtral">Mistral</option>
@@ -231,17 +267,21 @@ export function EnginePage({
             </select>
           </div>
 
-          <div className="settings-section">
-            <h2>{reformProvider.label}</h2>
-            <p className="hint">{reformProvider.hint}</p>
-            <input
-              type="password"
-              className="settings-input"
-              value={reformProvider.key}
-              onChange={(e) => reformProvider.setKey(e.target.value)}
-              placeholder={reformProvider.placeholder}
-            />
-          </div>
+          {isApple ? (
+            <AppleIntelligenceSection status={appleStatus} />
+          ) : (
+            <div className="settings-section">
+              <h2>{reformProvider.label}</h2>
+              <p className="hint">{reformProvider.hint}</p>
+              <input
+                type="password"
+                className="settings-input"
+                value={reformProvider.key}
+                onChange={(e) => reformProvider.setKey(e.target.value)}
+                placeholder={reformProvider.placeholder}
+              />
+            </div>
+          )}
 
           <div className="settings-section">
             <h2>{t("models_used")}</h2>
@@ -252,7 +292,9 @@ export function EnginePage({
               </div>
               <div className="model-item">
                 <span className="model-label">{t("model_reformulation")}</span>
-                <code className="model-name">{reformProvider.reformulation}</code>
+                <code className="model-name">
+                  {isApple ? "apple on-device (local)" : reformProvider.reformulation}
+                </code>
               </div>
             </div>
           </div>

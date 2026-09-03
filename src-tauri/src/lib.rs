@@ -2,6 +2,7 @@
 //!
 //! Global shortcut to activate voice dictation.
 
+mod apple_intelligence;
 mod audio;
 mod models;
 mod pipeline;
@@ -341,9 +342,25 @@ async fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfi
     // Save to disk
     config.save(&app);
 
+    // Only the settings that feed create_engine warrant dropping the engine.
+    // The UI saves the whole config on mount, and rebuilding blindly made the
+    // local model load twice at every startup.
+    let engine_changed = {
+        let current = state.config.read().await;
+        current.stt_engine != config.stt_engine
+            || current.openai_api_key != config.openai_api_key
+            || current.mistral_api_key != config.mistral_api_key
+            || current.gemini_api_key != config.gemini_api_key
+            || current.groq_api_key != config.groq_api_key
+    };
+
     {
         let mut current = state.config.write().await;
         *current = config;
+    }
+
+    if !engine_changed {
+        return Ok(());
     }
 
     // Reset pipeline to use the new engine/model. The events of a flush would
@@ -454,8 +471,151 @@ pub(crate) fn reset_engine(app: &AppHandle) {
     });
 }
 
-/// Process text via chat API: reformulate and/or translate in a single call
-async fn process_text(text: &str, reformulate: bool, output_language: &str, config: &AppConfig) -> String {
+/// Build the instructions sent to whichever model does the rewriting.
+///
+/// The "SAME LANGUAGE" clause is not decoration: the Apple on-device model
+/// answers in English by default and silently translated a French dictation
+/// without it. Cloud models infer the intent, this one does not.
+fn build_system_prompt(
+    reformulate: bool,
+    needs_translation: bool,
+    lang_name: &str,
+    on_device: bool,
+) -> String {
+    let prompt = match (reformulate, needs_translation) {
+        (true, true) => format!(
+            "Reformulate the following spoken text into clean written text, then translate it to {}. \
+            Fix grammar, punctuation, remove hesitations, repetitions and filler words. \
+            Keep the meaning and tone. Output ONLY the final translated result in {}. \
+            Do NOT include any preamble, explanation, label or prefix. \
+            Do NOT write \"Here's the translation\" or similar. Just the text.",
+            lang_name, lang_name
+        ),
+        (true, false) => "Reformulate the following spoken text into clean written text. \
+            Fix grammar, punctuation, remove hesitations, repetitions and filler words. \
+            Keep the meaning and tone. Preserve English words used intentionally \
+            (franglais, technical terms, dev/tech jargon like push, pull, merge, deploy, commit, build, etc.). \
+            Do not translate them. Output ONLY the reformulated text. \
+            Do NOT include any preamble, explanation or prefix.".to_string(),
+        (false, true) => format!(
+            "Translate the following text to {}. Output ONLY the translated text. \
+            Do NOT include any preamble, explanation, label or prefix like \"Here's the translation\". Just the text.",
+            lang_name
+        ),
+        (false, false) => String::new(),
+    };
+
+    if !on_device || prompt.is_empty() {
+        return prompt;
+    }
+
+    // Measured against the on-device model, not guessed. Two failure modes it
+    // has and the cloud models do not:
+    //   - it answers in English unless told otherwise, and the instruction only
+    //     holds when it comes LAST and names a concrete case;
+    //   - it summarises instead of cleaning up, dropping half a dictation.
+    // Left out of the cloud prompts on purpose: no evidence they need it.
+    let reinforcement = if needs_translation {
+        format!(
+            "Do NOT summarise, shorten or omit anything: every idea present in the input \
+             must still be present in the output. \
+             CRITICAL: your answer MUST be written in {}.",
+            lang_name
+        )
+    } else {
+        "Do NOT summarise, shorten or omit anything: every idea present in the input must \
+         still be present in the output. You are cleaning up the wording, not rewriting the content. \
+         CRITICAL: your answer MUST be written in the same language as the input. If the input \
+         is French, answer in French. Never translate the text into another language."
+            .to_string()
+    };
+
+    format!("{} {}", prompt, reinforcement)
+}
+
+/// Report whether the Apple on-device model can be used
+#[tauri::command]
+fn apple_intelligence_status() -> serde_json::Value {
+    let availability = apple_intelligence::availability();
+    serde_json::json!({
+        "availability": availability,
+        "message": availability.message(),
+    })
+}
+
+/// Run the reformulation on Apple's on-device model.
+///
+/// This never falls back to a cloud provider. Choosing the on-device model is a
+/// statement about where the text is allowed to go, and quietly shipping it to
+/// OpenAI because the local one was unavailable would break exactly that. When
+/// it cannot run, the raw transcription is pasted and the reason is shown.
+async fn process_on_device(
+    app: &AppHandle,
+    system_prompt: &str,
+    text: &str,
+    mode_label: &str,
+) -> String {
+    let availability = apple_intelligence::availability();
+    if availability != apple_intelligence::Availability::Available {
+        tracing::warn!("Apple Intelligence unavailable: {:?}", availability);
+        let _ = app.emit("config_error", availability.message().to_string());
+        return text.to_string();
+    }
+
+    let instructions = system_prompt.to_string();
+    let prompt = text.to_string();
+    // The FFI call parks its thread until the model answers
+    let result =
+        tokio::task::spawn_blocking(move || apple_intelligence::respond(&instructions, &prompt))
+            .await;
+
+    match result {
+        Ok(Ok(answer)) => {
+            let answer = answer.trim().to_string();
+            if answer.is_empty() {
+                tracing::error!("Apple Intelligence returned an empty answer");
+                return text.to_string();
+            }
+            // A 3B model can wander off and start commenting on the text
+            // instead of rewriting it. Rewriting stays close to the original
+            // length, so treat a blow-up as a failure and keep the dictation.
+            if answer.chars().count() > text.chars().count() * 3 + 200 {
+                tracing::warn!(
+                    "Apple Intelligence answer looks runaway ({} chars for {} in), keeping the transcription",
+                    answer.chars().count(),
+                    text.chars().count()
+                );
+                return text.to_string();
+            }
+            tracing::info!(
+                "Processed on device ({}): '{}' -> '{}'",
+                mode_label,
+                text,
+                answer
+            );
+            answer
+        }
+        Ok(Err(e)) => {
+            tracing::error!("Apple Intelligence error: {}", e);
+            let _ = app.emit("config_error", format!("Apple Intelligence: {}", e));
+            text.to_string()
+        }
+        Err(e) => {
+            tracing::error!("Apple Intelligence task panicked: {}", e);
+            text.to_string()
+        }
+    }
+}
+
+/// Process text: reformulate and/or translate in a single call, either on the
+/// Apple on-device model or through a chat API
+async fn process_text(
+    app: &AppHandle,
+    text: &str,
+    reformulate: bool,
+    output_language: &str,
+    config: &AppConfig,
+) -> String {
     // Determine API endpoint, model, and key based on engine.
     // Parakeet is local STT: reformulation uses the configured chat provider.
     let provider = if config.stt_engine == "parakeet" {
@@ -463,7 +623,12 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
     } else {
         config.stt_engine.as_str()
     };
+
+    let on_device = provider == "apple";
+
     let (api_url, model, api_key) = match provider {
+        // Nothing to configure: the model lives in the OS
+        "apple" => ("", "apple-on-device", "on-device"),
         "gemini" => (
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             "gemini-2.5-flash-lite",
@@ -507,28 +672,7 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
         other => other,
     };
 
-    let system_prompt = match (reformulate, needs_translation) {
-        (true, true) => format!(
-            "Reformulate the following spoken text into clean written text, then translate it to {}. \
-            Fix grammar, punctuation, remove hesitations, repetitions and filler words. \
-            Keep the meaning and tone. Output ONLY the final translated result in {}. \
-            Do NOT include any preamble, explanation, label or prefix. \
-            Do NOT write \"Here's the translation\" or similar. Just the text.",
-            lang_name, lang_name
-        ),
-        (true, false) => "Reformulate the following spoken text into clean written text. \
-            Fix grammar, punctuation, remove hesitations, repetitions and filler words. \
-            Keep the meaning and tone. Preserve English words used intentionally \
-            (franglais, technical terms, dev/tech jargon like push, pull, merge, deploy, commit, build, etc.). \
-            Do not translate them. Output ONLY the reformulated text. \
-            Do NOT include any preamble, explanation or prefix.".to_string(),
-        (false, true) => format!(
-            "Translate the following text to {}. Output ONLY the translated text. \
-            Do NOT include any preamble, explanation, label or prefix like \"Here's the translation\". Just the text.",
-            lang_name
-        ),
-        _ => unreachable!(),
-    };
+    let system_prompt = build_system_prompt(reformulate, needs_translation, lang_name, on_device);
 
     let mode_label = match (reformulate, needs_translation) {
         (true, true) => "reformulate+translate",
@@ -538,6 +682,10 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
     };
 
     tracing::info!("Processing text ({}, model: {}): '{}'", mode_label, model, text);
+
+    if on_device {
+        return process_on_device(app, &system_prompt, text, mode_label).await;
+    }
 
     let client = reqwest::Client::new();
     let body = serde_json::json!({
@@ -888,6 +1036,7 @@ async fn do_stop_and_paste(app: AppHandle, state: State<'_, AppState>) -> Result
 
     // Reformulate and/or translate in a single chat API call
     let final_text = process_text(
+        &app,
         &text,
         config.reformulate,
         &config.output_language,
@@ -1084,6 +1233,7 @@ pub fn run() {
             toggle_overlay,
             cancel_recording,
             open_accessibility_settings,
+            apple_intelligence_status,
             models::parakeet_model_status,
             models::download_parakeet_model,
             models::cancel_parakeet_download,
@@ -1190,6 +1340,34 @@ mod tests {
         fn is_ready(&self) -> bool {
             true
         }
+    }
+
+    /// The on-device model answers in English unless told otherwise, which
+    /// silently turned a French dictation into an English one. Guard the
+    /// clause that fixes it, against the real production prompt.
+    ///
+    /// Skipped where Apple Intelligence is off (CI runners, older macOS).
+    #[test]
+    fn on_device_reformulation_keeps_the_input_language() {
+        if apple_intelligence::availability() != apple_intelligence::Availability::Available {
+            eprintln!("Apple Intelligence unavailable, skipping");
+            return;
+        }
+
+        let prompt = build_system_prompt(true, false, "", true);
+        let dictation = "alors euh je voulais te dire que le le build il est casse \
+                         sur linux euh faut qu'on regarde ca demain matin";
+        let answer = apple_intelligence::respond(&prompt, dictation)
+            .expect("on-device model should answer");
+        eprintln!("answer: {}", answer);
+
+        let lowered = answer.to_lowercase();
+        let french_markers = [" je ", " le ", " que ", " est ", "il "];
+        assert!(
+            french_markers.iter().any(|m| lowered.contains(m)),
+            "answer drifted out of French: {}",
+            answer
+        );
     }
 
     /// Cancelling must drop the buffered audio, never transcribe it:
