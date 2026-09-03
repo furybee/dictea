@@ -62,10 +62,15 @@ function ParakeetModelSection() {
       setError(e.payload);
       refresh();
     });
+    const unlistenCancelled = listen("parakeet_download_cancelled", () => {
+      setProgress(null);
+      refresh();
+    });
     return () => {
       unlistenProgress.then((fn) => fn());
       unlistenDone.then((fn) => fn());
       unlistenError.then((fn) => fn());
+      unlistenCancelled.then((fn) => fn());
     };
   }, [refresh]);
 
@@ -76,6 +81,10 @@ function ParakeetModelSection() {
       setError(String(e));
       refresh();
     });
+  };
+
+  const cancelDownload = () => {
+    invoke("cancel_parakeet_download").catch(console.error);
   };
 
   const deleteModel = () => {
@@ -103,6 +112,9 @@ function ParakeetModelSection() {
                 <> — {formatMB(progress.downloaded)} / {formatMB(progress.total)} Mo</>
               )}
             </span>
+            <button className="btn-secondary" onClick={cancelDownload}>
+              {t("cancel_download")}
+            </button>
           </div>
           <div className="progress-track">
             <div className="progress-fill" style={{ width: `${percent}%` }} />

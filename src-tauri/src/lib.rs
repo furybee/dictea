@@ -165,7 +165,23 @@ impl TranscriptionPipeline {
         Ok(())
     }
 
+    /// Stop without transcribing: the buffered audio is dropped.
+    /// Returns immediately — no inference, no API call.
+    fn cancel(&mut self) {
+        if let Some(mut handle) = self.audio_handle.take() {
+            handle.stop();
+        }
+        if self.is_running {
+            self.engine.reset();
+            self.is_running = false;
+            tracing::info!("Transcription cancelled, buffered audio dropped");
+        }
+    }
+
     /// Stop the pipeline and return remaining events
+    ///
+    /// Blocking: the engine flush waits for the transcription to complete.
+    /// Callers on the async runtime must go through `spawn_blocking`.
     fn stop(&mut self) -> Vec<SttEvent> {
         let mut remaining = Vec::new();
         if !self.is_running {
@@ -330,10 +346,11 @@ async fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfi
         *current = config;
     }
 
-    // Reset pipeline to use the new engine/model
+    // Reset pipeline to use the new engine/model. The events of a flush would
+    // go nowhere since the pipeline is dropped right after, so cancel instead.
     let mut pipeline = state.pipeline.lock().await;
     if let Some(ref mut p) = *pipeline {
-        p.stop();
+        p.cancel();
     }
     *pipeline = None;
     drop(pipeline);
@@ -431,7 +448,7 @@ pub(crate) fn reset_engine(app: &AppHandle) {
         let state = app.state::<AppState>();
         let mut pipeline = state.pipeline.lock().await;
         if let Some(ref mut p) = *pipeline {
-            p.stop();
+            p.cancel();
         }
         *pipeline = None;
     });
@@ -727,14 +744,21 @@ async fn start_recording(
 
 /// Stop recording (internal, without hiding overlay)
 async fn stop_recording_internal(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    let remaining_events = {
-        let mut pipeline_guard = state.pipeline.lock().await;
-        if let Some(ref mut pipeline) = *pipeline_guard {
-            pipeline.stop()
-        } else {
-            Vec::new()
+    // The flush blocks until the transcription completes: keep it off the
+    // async runtime so the rest of the app stays responsive.
+    let pipeline_arc = state.pipeline.clone();
+    let remaining_events = tokio::task::spawn_blocking(move || {
+        let mut pipeline_guard = pipeline_arc.blocking_lock();
+        match *pipeline_guard {
+            Some(ref mut pipeline) => pipeline.stop(),
+            None => Vec::new(),
         }
-    };
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Flush task panicked: {}", e);
+        Vec::new()
+    });
 
     let mut errors = Vec::new();
 
@@ -979,11 +1003,12 @@ async fn cancel_recording(app: AppHandle, state: State<'_, AppState>) -> Result<
         return Ok(());
     }
 
-    // Stop pipeline without processing text
+    // Drop the buffered audio instead of transcribing it: cancelling must be
+    // instant, and must not burn an API call for a result nobody wants.
     {
         let mut pipeline_guard = state.pipeline.lock().await;
         if let Some(ref mut pipeline) = *pipeline_guard {
-            pipeline.stop();
+            pipeline.cancel();
         }
     }
 
@@ -1033,6 +1058,7 @@ pub fn run() {
             cancel_recording,
             models::parakeet_model_status,
             models::download_parakeet_model,
+            models::cancel_parakeet_download,
             models::delete_parakeet_model,
         ])
         .setup(|app| {
@@ -1092,4 +1118,101 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("Error launching application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    /// Engine that records what the pipeline asks of it
+    #[derive(Default)]
+    struct FakeEngine {
+        flushed: Arc<AtomicUsize>,
+        reset: Arc<AtomicUsize>,
+        buffered: usize,
+    }
+
+    impl SttEngine for FakeEngine {
+        fn load(_model_path: &str) -> Result<Self, stt::SttError> {
+            Ok(Self::default())
+        }
+        fn set_language(&mut self, _language: Language) {}
+        fn language(&self) -> &Language {
+            &Language::Auto
+        }
+        fn push_audio(&mut self, pcm: &[f32]) {
+            self.buffered += pcm.len();
+        }
+        fn poll(&mut self) -> Option<SttEvent> {
+            None
+        }
+        fn flush(&mut self) {
+            // Real engines block here until the transcription completes
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            self.flushed.fetch_add(1, Ordering::SeqCst);
+        }
+        fn reset(&mut self) {
+            self.buffered = 0;
+            self.reset.fetch_add(1, Ordering::SeqCst);
+        }
+        fn name(&self) -> &str {
+            "fake"
+        }
+        fn is_ready(&self) -> bool {
+            true
+        }
+    }
+
+    /// Cancelling must drop the buffered audio, never transcribe it:
+    /// a flush here would burn an API call for a result nobody wants.
+    #[test]
+    fn cancel_resets_the_engine_without_flushing() {
+        let flushed = Arc::new(AtomicUsize::new(0));
+        let reset = Arc::new(AtomicUsize::new(0));
+        let engine = FakeEngine {
+            flushed: flushed.clone(),
+            reset: reset.clone(),
+            buffered: 0,
+        };
+
+        let mut pipeline = TranscriptionPipeline::new(Box::new(engine));
+        pipeline.start(Language::Auto).unwrap();
+        pipeline.process_audio(vec![0.0; 16000]);
+        pipeline.cancel();
+
+        assert_eq!(flushed.load(Ordering::SeqCst), 0, "cancel must not transcribe");
+        assert_eq!(reset.load(Ordering::SeqCst), 1, "cancel must drop the audio");
+        assert!(!pipeline.is_running);
+    }
+
+    /// The stop path locks the pipeline from inside spawn_blocking:
+    /// tokio::sync::Mutex::blocking_lock panics if it ever runs in an async
+    /// context, so pin the pattern used by stop_recording_internal.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stop_flushes_from_a_blocking_task() {
+        let flushed = Arc::new(AtomicUsize::new(0));
+        let engine = FakeEngine {
+            flushed: flushed.clone(),
+            reset: Arc::new(AtomicUsize::new(0)),
+            buffered: 0,
+        };
+
+        let mut pipeline = TranscriptionPipeline::new(Box::new(engine));
+        pipeline.start(Language::Auto).unwrap();
+        let pipeline = Arc::new(Mutex::new(Some(pipeline)));
+
+        let events = tokio::task::spawn_blocking(move || {
+            let mut guard = pipeline.blocking_lock();
+            match *guard {
+                Some(ref mut p) => p.stop(),
+                None => Vec::new(),
+            }
+        })
+        .await
+        .expect("flush task must not panic");
+
+        assert_eq!(flushed.load(Ordering::SeqCst), 1);
+        assert!(events.is_empty());
+    }
 }

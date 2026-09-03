@@ -66,6 +66,7 @@ export const translations = {
     downloading_model: "Telechargement",
     delete_model: "Supprimer le modele",
     download_error: "Erreur de telechargement",
+    cancel_download: "Annuler",
   },
   en: {
     subtitle: "Voice dictation",
@@ -134,6 +135,7 @@ export const translations = {
     downloading_model: "Downloading",
     delete_model: "Delete model",
     download_error: "Download error",
+    cancel_download: "Cancel",
   },
 } as const;
 
