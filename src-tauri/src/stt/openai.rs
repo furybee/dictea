@@ -130,17 +130,20 @@ impl OpenAiEngine {
 
     /// Send all accumulated audio buffer to the API
     fn send_full_audio(&mut self) {
-        if self.audio_buffer.is_empty() {
-            return;
-        }
-
-        // Ignore if less than 1 second of audio
+        // Ignore if less than 1 second of audio (an empty buffer included:
+        // a tap on the shortcut should say so rather than do nothing)
         if self.audio_buffer.len() < 16000 {
             tracing::debug!(
                 "Audio too short ({} samples), skipped",
                 self.audio_buffer.len()
             );
             self.audio_buffer.clear();
+            // Tell the user, otherwise the dictation just vanishes
+            if let Ok(mut events) = self.shared_events.lock() {
+                events.push_back(SttEvent::Error(
+                    "Recording too short (less than 1 second)".to_string(),
+                ));
+            }
             return;
         }
 
@@ -173,6 +176,9 @@ impl OpenAiEngine {
                     }
                     Err(e) => {
                         tracing::error!("OpenAI error: {}", e);
+                        if let Ok(mut events) = shared_events.lock() {
+                            events.push_back(SttEvent::Error(format!("OpenAI: {}", e)));
+                        }
                     }
                 }
                 pending.store(false, Ordering::SeqCst);

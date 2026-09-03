@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 export function OverlayView() {
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState(false);
   const barsRef = useRef<(HTMLSpanElement | null)[]>([]);
   const targetLevelRef = useRef(0);
   const smoothLevelRef = useRef(0);
@@ -33,18 +34,27 @@ export function OverlayView() {
 
     (window as any).__overlaySetProcessing = (v: boolean) => setProcessing(v);
     (window as any).__overlaySetLevel = (v: number) => { targetLevelRef.current = v; };
+    (window as any).__overlaySetError = (v: boolean) => {
+      setError(v);
+      if (v) setProcessing(false);
+    };
 
     return () => {
       cancelAnimationFrame(rafRef.current);
       delete (window as any).__overlaySetProcessing;
       delete (window as any).__overlaySetLevel;
+      delete (window as any).__overlaySetError;
     };
   }, []);
 
   return (
     <div className="overlay-container">
-      <div className={`overlay-pill${processing ? " processing" : ""}`}>
-        {processing ? (
+      <div className={`overlay-pill${error ? " error" : processing ? " processing" : ""}`}>
+        {error ? (
+          <div className="overlay-error" role="img" aria-label="Transcription failed">
+            !
+          </div>
+        ) : processing ? (
           <div className="processing-dots">
             <span className="processing-dot" />
             <span className="processing-dot" />

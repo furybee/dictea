@@ -15,11 +15,15 @@ export function SettingsView() {
   const { showToast } = useToast();
 
   useEffect(() => {
-    const unlisten = listen<string>("config_error", (event) => {
+    const unlistenConfig = listen<string>("config_error", (event) => {
+      showToast(event.payload);
+    });
+    const unlistenStt = listen<string>("stt_error", (event) => {
       showToast(event.payload);
     });
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenConfig.then((fn) => fn());
+      unlistenStt.then((fn) => fn());
     };
   }, [showToast]);
 
@@ -56,6 +60,8 @@ export function SettingsView() {
               setGroqApiKey={config.setGroqApiKey}
               sttEngine={config.sttEngine}
               setSttEngine={config.setSttEngine}
+              parakeetReformProvider={config.parakeetReformProvider}
+              setParakeetReformProvider={config.setParakeetReformProvider}
             />
           )}
 

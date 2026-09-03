@@ -605,6 +605,60 @@ body {
 }
 
 /* ============================================
+   PARAKEET LOCAL MODEL
+   ============================================ */
+
+.model-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 380px;
+}
+
+.model-status-text {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.model-status-badge {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.model-status-ok {
+  color: #34d399;
+}
+
+.model-download {
+  max-width: 380px;
+}
+
+.progress-track {
+  margin-top: 10px;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  transition: width 0.2s ease;
+}
+
+.model-error {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: #f87171;
+  max-width: 380px;
+}
+
+/* ============================================
    TOAST NOTIFICATION
    ============================================ */
 
@@ -751,6 +805,41 @@ body {
   }
   40% {
     transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+/* Error state (transcription failed) */
+.overlay-pill.error {
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.5),
+    0 0 30px rgba(239, 68, 68, 0.2),
+    0 0 60px rgba(239, 68, 68, 0.1);
+}
+
+.overlay-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(248, 113, 113, 0.8);
+  color: #fca5a5;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.35);
+  animation: error-appear 0.25s ease-out;
+}
+
+@keyframes error-appear {
+  from {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
     opacity: 1;
   }
 }

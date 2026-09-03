@@ -3,11 +3,12 @@
 //! Global shortcut to activate voice dictation.
 
 mod audio;
+mod models;
 mod pipeline;
 mod stt;
 
 use audio::{AudioConfig, AudioHandle};
-use stt::{Language, GeminiEngine, GroqEngine, OpenAiEngine, VoxtralEngine, SttEngine, SttEvent};
+use stt::{Language, GeminiEngine, GroqEngine, OpenAiEngine, ParakeetEngine, VoxtralEngine, SttEngine, SttEvent};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -39,6 +40,10 @@ pub struct AppConfig {
     /// Selected audio input device name (empty = system default)
     #[serde(default)]
     pub audio_device: String,
+    /// Chat provider for reformulation/translation when STT is local (parakeet):
+    /// "openai", "voxtral", "gemini" or "groq"
+    #[serde(default = "default_stt_engine")]
+    pub parakeet_reformulation_provider: String,
 }
 
 fn default_stt_engine() -> String {
@@ -57,6 +62,7 @@ impl Default for AppConfig {
             gemini_api_key: String::new(),
             groq_api_key: String::new(),
             audio_device: String::new(),
+            parakeet_reformulation_provider: "openai".to_string(),
         }
     }
 }
@@ -159,7 +165,23 @@ impl TranscriptionPipeline {
         Ok(())
     }
 
+    /// Stop without transcribing: the buffered audio is dropped.
+    /// Returns immediately — no inference, no API call.
+    fn cancel(&mut self) {
+        if let Some(mut handle) = self.audio_handle.take() {
+            handle.stop();
+        }
+        if self.is_running {
+            self.engine.reset();
+            self.is_running = false;
+            tracing::info!("Transcription cancelled, buffered audio dropped");
+        }
+    }
+
     /// Stop the pipeline and return remaining events
+    ///
+    /// Blocking: the engine flush waits for the transcription to complete.
+    /// Callers on the async runtime must go through `spawn_blocking`.
     fn stop(&mut self) -> Vec<SttEvent> {
         let mut remaining = Vec::new();
         if !self.is_running {
@@ -197,6 +219,8 @@ pub struct AppState {
     stopping: Arc<AtomicBool>,
     /// Mic preview handle for settings UI
     mic_preview: Arc<Mutex<Option<AudioHandle>>>,
+    /// Last STT error of the current dictation (cleared on each start)
+    last_error: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -207,6 +231,7 @@ impl AppState {
             transcription: Arc::new(RwLock::new(TranscriptionState::default())),
             stopping: Arc::new(AtomicBool::new(false)),
             mic_preview: Arc::new(Mutex::new(None)),
+            last_error: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -316,22 +341,39 @@ async fn set_config(app: AppHandle, state: State<'_, AppState>, config: AppConfi
     // Save to disk
     config.save(&app);
 
-    let mut current = state.config.write().await;
-    *current = config;
+    {
+        let mut current = state.config.write().await;
+        *current = config;
+    }
 
-    // Reset pipeline to use the new engine/model
+    // Reset pipeline to use the new engine/model. The events of a flush would
+    // go nowhere since the pipeline is dropped right after, so cancel instead.
     let mut pipeline = state.pipeline.lock().await;
     if let Some(ref mut p) = *pipeline {
-        p.stop();
+        p.cancel();
     }
     *pipeline = None;
+    drop(pipeline);
+
+    // Start loading the local model right away if it was just selected
+    warm_local_engine(&app);
 
     Ok(())
 }
 
 /// Create the STT engine based on config
-fn create_engine(config: &AppConfig) -> Result<Box<dyn SttEngine>, String> {
+fn create_engine(config: &AppConfig, app: &AppHandle) -> Result<Box<dyn SttEngine>, String> {
     match config.stt_engine.as_str() {
+        "parakeet" => {
+            let model_dir = models::parakeet_model_dir(app);
+            if !stt::parakeet::is_model_downloaded(&model_dir) {
+                return Err("Parakeet model not downloaded. Configure it in Settings > Engine.".to_string());
+            }
+            let engine = ParakeetEngine::load(&model_dir.to_string_lossy())
+                .map_err(|e| format!("Parakeet error: {}", e))?;
+            tracing::info!("Parakeet local STT engine initialized");
+            Ok(Box::new(engine))
+        }
         "gemini" => {
             if config.gemini_api_key.is_empty() {
                 return Err("Gemini API key required".to_string());
@@ -371,10 +413,57 @@ fn create_engine(config: &AppConfig) -> Result<Box<dyn SttEngine>, String> {
     }
 }
 
+/// Pre-create the local engine in the background so the first dictation doesn't
+/// pay for the ONNX model load (a few seconds). No-op for the API engines,
+/// which have nothing to load.
+pub(crate) fn warm_local_engine(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let config = state.config.read().await.clone();
+        if config.stt_engine != "parakeet" {
+            return;
+        }
+
+        let mut pipeline = state.pipeline.lock().await;
+        if pipeline.is_some() {
+            return;
+        }
+        match create_engine(&config, &app) {
+            // ParakeetEngine::load returns immediately, the ONNX session
+            // finishes loading on its own thread.
+            Ok(engine) => {
+                *pipeline = Some(TranscriptionPipeline::new(engine));
+                tracing::info!("Parakeet engine pre-loading in background");
+            }
+            Err(e) => tracing::warn!("Parakeet pre-load skipped: {}", e),
+        }
+    });
+}
+
+/// Drop the current engine, e.g. after the local model has been deleted
+pub(crate) fn reset_engine(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let mut pipeline = state.pipeline.lock().await;
+        if let Some(ref mut p) = *pipeline {
+            p.cancel();
+        }
+        *pipeline = None;
+    });
+}
+
 /// Process text via chat API: reformulate and/or translate in a single call
 async fn process_text(text: &str, reformulate: bool, output_language: &str, config: &AppConfig) -> String {
-    // Determine API endpoint, model, and key based on engine
-    let (api_url, model, api_key) = match config.stt_engine.as_str() {
+    // Determine API endpoint, model, and key based on engine.
+    // Parakeet is local STT: reformulation uses the configured chat provider.
+    let provider = if config.stt_engine == "parakeet" {
+        config.parakeet_reformulation_provider.as_str()
+    } else {
+        config.stt_engine.as_str()
+    };
+    let (api_url, model, api_key) = match provider {
         "gemini" => (
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             "gemini-2.5-flash-lite",
@@ -390,6 +479,7 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
             "llama-3.3-70b-versatile",
             config.groq_api_key.as_str(),
         ),
+        // Text passes through unchanged if no key is set for the provider
         _ => (
             "https://api.openai.com/v1/chat/completions",
             "gpt-4o-mini",
@@ -484,6 +574,20 @@ async fn process_text(text: &str, reformulate: bool, output_language: &str, conf
     }
 }
 
+/// Record an STT error and surface it to the user (toast + overlay)
+async fn report_stt_error(
+    app: &AppHandle,
+    last_error: &Arc<Mutex<Option<String>>>,
+    message: String,
+) {
+    tracing::error!("STT error: {}", message);
+    {
+        let mut guard = last_error.lock().await;
+        *guard = Some(message.clone());
+    }
+    let _ = app.emit("stt_error", message);
+}
+
 /// Start recording
 #[tauri::command]
 async fn start_recording(
@@ -504,7 +608,7 @@ async fn start_recording(
     {
         let mut pipeline_guard = state.pipeline.lock().await;
         if pipeline_guard.is_none() {
-            let engine = create_engine(&config)?;
+            let engine = create_engine(&config, &app)?;
             *pipeline_guard = Some(TranscriptionPipeline::new(engine));
         }
     }
@@ -516,6 +620,10 @@ async fn start_recording(
         trans.partial_text.clear();
         trans.final_text.clear();
     }
+    {
+        let mut last_error = state.last_error.lock().await;
+        *last_error = None;
+    }
 
     // Start the pipeline
     {
@@ -526,22 +634,27 @@ async fn start_recording(
             let mut receiver = pipeline.subscribe();
             let app_handle = app.clone();
             let transcription = state.transcription.clone();
+            let last_error = state.last_error.clone();
 
             tokio::spawn(async move {
                 while let Ok(event) = receiver.recv().await {
-                    let mut trans = transcription.write().await;
                     match event {
                         SttEvent::Partial(text) => {
+                            let mut trans = transcription.write().await;
                             trans.partial_text = text.clone();
                             let _ = app_handle.emit("stt_partial", text);
                         }
                         SttEvent::Final(text) => {
+                            let mut trans = transcription.write().await;
                             if !trans.final_text.is_empty() {
                                 trans.final_text.push(' ');
                             }
                             trans.final_text.push_str(&text);
                             trans.partial_text.clear();
                             let _ = app_handle.emit("stt_final", text);
+                        }
+                        SttEvent::Error(message) => {
+                            report_stt_error(&app_handle, &last_error, message).await;
                         }
                     }
                 }
@@ -623,6 +736,7 @@ async fn start_recording(
     let _ = app.emit("recording_started", ());
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.eval("window.__overlaySetProcessing && window.__overlaySetProcessing(false)");
+        let _ = overlay.eval("window.__overlaySetError && window.__overlaySetError(false)");
     }
     tracing::info!("Recording started ({})", config.stt_engine);
     Ok(())
@@ -630,14 +744,23 @@ async fn start_recording(
 
 /// Stop recording (internal, without hiding overlay)
 async fn stop_recording_internal(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    let remaining_events = {
-        let mut pipeline_guard = state.pipeline.lock().await;
-        if let Some(ref mut pipeline) = *pipeline_guard {
-            pipeline.stop()
-        } else {
-            Vec::new()
+    // The flush blocks until the transcription completes: keep it off the
+    // async runtime so the rest of the app stays responsive.
+    let pipeline_arc = state.pipeline.clone();
+    let remaining_events = tokio::task::spawn_blocking(move || {
+        let mut pipeline_guard = pipeline_arc.blocking_lock();
+        match *pipeline_guard {
+            Some(ref mut pipeline) => pipeline.stop(),
+            None => Vec::new(),
         }
-    };
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!("Flush task panicked: {}", e);
+        Vec::new()
+    });
+
+    let mut errors = Vec::new();
 
     let final_text = {
         let mut trans = state.transcription.write().await;
@@ -655,6 +778,7 @@ async fn stop_recording_internal(app: AppHandle, state: State<'_, AppState>) -> 
                     trans.final_text.push_str(&text);
                     trans.partial_text.clear();
                 }
+                SttEvent::Error(message) => errors.push(message),
             }
         }
 
@@ -667,6 +791,10 @@ async fn stop_recording_internal(app: AppHandle, state: State<'_, AppState>) -> 
         }
         text.trim().to_string()
     };
+
+    for message in errors {
+        report_stt_error(&app, &state.last_error, message).await;
+    }
 
     let _ = app.emit("recording_stopped", final_text.clone());
     tracing::info!("Recording stopped, text: {}", final_text);
@@ -707,7 +835,21 @@ async fn do_stop_and_paste(app: AppHandle, state: State<'_, AppState>) -> Result
     let text = stop_recording_internal(app.clone(), state.clone()).await?;
 
     if text.is_empty() {
-        tracing::info!("No text to paste");
+        let error = state.last_error.lock().await.clone();
+        match error {
+            // Transcription failed: flash the pill red so the failure isn't silent
+            Some(message) => {
+                tracing::warn!("Dictation failed without text: {}", message);
+                if let Some(overlay) = app.get_webview_window("overlay") {
+                    let _ = overlay.eval("window.__overlaySetError && window.__overlaySetError(true)");
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+                if let Some(overlay) = app.get_webview_window("overlay") {
+                    let _ = overlay.eval("window.__overlaySetError && window.__overlaySetError(false)");
+                }
+            }
+            None => tracing::info!("No text to paste"),
+        }
         hide_overlay_and_refocus(&app);
         return Ok(());
     }
@@ -842,6 +984,7 @@ async fn toggle_overlay(app: AppHandle, state: State<'_, AppState>) -> Result<()
     } else {
         let result = start_recording(app.clone(), state, None).await;
         if let Err(ref e) = result {
+            tracing::error!("start_recording failed: {}", e);
             let _ = app.emit("config_error", e.clone());
         }
         result
@@ -860,11 +1003,12 @@ async fn cancel_recording(app: AppHandle, state: State<'_, AppState>) -> Result<
         return Ok(());
     }
 
-    // Stop pipeline without processing text
+    // Drop the buffered audio instead of transcribing it: cancelling must be
+    // instant, and must not burn an API call for a result nobody wants.
     {
         let mut pipeline_guard = state.pipeline.lock().await;
         if let Some(ref mut pipeline) = *pipeline_guard {
-            pipeline.stop();
+            pipeline.cancel();
         }
     }
 
@@ -912,6 +1056,10 @@ pub fn run() {
             get_transcription_state,
             toggle_overlay,
             cancel_recording,
+            models::parakeet_model_status,
+            models::download_parakeet_model,
+            models::cancel_parakeet_download,
+            models::delete_parakeet_model,
         ])
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -924,6 +1072,9 @@ pub fn run() {
                 let mut c = config.write().await;
                 *c = saved_config;
             });
+
+            // Local engine: start loading the model now, not on first dictation
+            warm_local_engine(app.handle());
 
             let app_handle = app.handle().clone();
 
@@ -940,6 +1091,7 @@ pub fn run() {
             app.handle().plugin(
                 tauri_plugin_global_shortcut::Builder::new()
                     .with_handler(move |_app, shortcut, event| {
+                        tracing::trace!("Shortcut event: {:?} ({:?})", shortcut, event.state);
                         if event.state == ShortcutState::Pressed {
                             let handle = app_handle.clone();
                             if shortcut == &toggle_sc {
@@ -966,4 +1118,101 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("Error launching application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    /// Engine that records what the pipeline asks of it
+    #[derive(Default)]
+    struct FakeEngine {
+        flushed: Arc<AtomicUsize>,
+        reset: Arc<AtomicUsize>,
+        buffered: usize,
+    }
+
+    impl SttEngine for FakeEngine {
+        fn load(_model_path: &str) -> Result<Self, stt::SttError> {
+            Ok(Self::default())
+        }
+        fn set_language(&mut self, _language: Language) {}
+        fn language(&self) -> &Language {
+            &Language::Auto
+        }
+        fn push_audio(&mut self, pcm: &[f32]) {
+            self.buffered += pcm.len();
+        }
+        fn poll(&mut self) -> Option<SttEvent> {
+            None
+        }
+        fn flush(&mut self) {
+            // Real engines block here until the transcription completes
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            self.flushed.fetch_add(1, Ordering::SeqCst);
+        }
+        fn reset(&mut self) {
+            self.buffered = 0;
+            self.reset.fetch_add(1, Ordering::SeqCst);
+        }
+        fn name(&self) -> &str {
+            "fake"
+        }
+        fn is_ready(&self) -> bool {
+            true
+        }
+    }
+
+    /// Cancelling must drop the buffered audio, never transcribe it:
+    /// a flush here would burn an API call for a result nobody wants.
+    #[test]
+    fn cancel_resets_the_engine_without_flushing() {
+        let flushed = Arc::new(AtomicUsize::new(0));
+        let reset = Arc::new(AtomicUsize::new(0));
+        let engine = FakeEngine {
+            flushed: flushed.clone(),
+            reset: reset.clone(),
+            buffered: 0,
+        };
+
+        let mut pipeline = TranscriptionPipeline::new(Box::new(engine));
+        pipeline.start(Language::Auto).unwrap();
+        pipeline.process_audio(vec![0.0; 16000]);
+        pipeline.cancel();
+
+        assert_eq!(flushed.load(Ordering::SeqCst), 0, "cancel must not transcribe");
+        assert_eq!(reset.load(Ordering::SeqCst), 1, "cancel must drop the audio");
+        assert!(!pipeline.is_running);
+    }
+
+    /// The stop path locks the pipeline from inside spawn_blocking:
+    /// tokio::sync::Mutex::blocking_lock panics if it ever runs in an async
+    /// context, so pin the pattern used by stop_recording_internal.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stop_flushes_from_a_blocking_task() {
+        let flushed = Arc::new(AtomicUsize::new(0));
+        let engine = FakeEngine {
+            flushed: flushed.clone(),
+            reset: Arc::new(AtomicUsize::new(0)),
+            buffered: 0,
+        };
+
+        let mut pipeline = TranscriptionPipeline::new(Box::new(engine));
+        pipeline.start(Language::Auto).unwrap();
+        let pipeline = Arc::new(Mutex::new(Some(pipeline)));
+
+        let events = tokio::task::spawn_blocking(move || {
+            let mut guard = pipeline.blocking_lock();
+            match *guard {
+                Some(ref mut p) => p.stop(),
+                None => Vec::new(),
+            }
+        })
+        .await
+        .expect("flush task must not panic");
+
+        assert_eq!(flushed.load(Ordering::SeqCst), 1);
+        assert!(events.is_empty());
+    }
 }
