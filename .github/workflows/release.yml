@@ -21,7 +21,10 @@ jobs:
           - platform: windows-latest
             args: ""
             rust-targets: ""
-          - platform: ubuntu-22.04
+          # 24.04 and not 22.04: the prebuilt onnxruntime that `ort` downloads
+          # needs glibc >= 2.38 (__isoc23_strtoll) and libstdc++ 13+
+          # (_M_replace_cold), neither of which ships on 22.04.
+          - platform: ubuntu-24.04
             args: ""
             rust-targets: ""
     runs-on: ${{ matrix.platform }}
@@ -29,12 +32,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.platform == 'ubuntu-24.04'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
+            libayatana-appindicator3-dev \
             librsvg2-dev \
             patchelf \
             libxdo-dev \
