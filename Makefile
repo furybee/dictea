@@ -60,7 +60,9 @@ release: ## Crée un tag et déclenche la release CI/CD (usage: make release VER
 	@sed -i.bak '4s/"version": "[^"]*"/"version": "$(VERSION)"/' src-tauri/tauri.conf.json && rm -f src-tauri/tauri.conf.json.bak
 	@# Bump version dans package.json (line 3: "version": "x.y.z")
 	@sed -i.bak '3s/"version": "[^"]*"/"version": "$(VERSION)"/' package.json && rm -f package.json.bak
-	git add src-tauri/tauri.conf.json src-tauri/Cargo.toml package.json
+	@# Repercuter la version dans Cargo.lock (sinon il reste sur l'ancienne)
+	cd src-tauri && cargo update -p dictea --offline
+	git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock package.json
 	git diff --cached --quiet || git commit -m "release: v$(VERSION)"
 	@# Delete tag locally and remotely if it already exists, then recreate
 	-@git tag -d "v$(VERSION)" 2>/dev/null
