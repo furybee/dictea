@@ -44,11 +44,19 @@ Download the latest release from [GitHub Releases](https://github.com/furybee/di
 | Windows | `.msi` |
 | Linux | `.deb`, `.AppImage` |
 
-> **macOS:** The app is not signed with an Apple Developer certificate. After installing, run:
+> **macOS:** The app is not notarized by Apple, so Gatekeeper blocks it on first launch. After installing, run:
 > ```bash
 > xattr -cr /Applications/Dictea.app
 > ```
 > Then open the app normally.
+
+### Permissions across updates
+
+Builds are signed with a stable self-signed certificate. It does nothing for Gatekeeper — the app still comes from an unidentified developer — but it keeps the app's code identity constant from one version to the next, so the Microphone and Accessibility permissions you grant survive updates.
+
+They did not before: an ad-hoc signature pins the app's identity to the hash of that exact binary, so every update looked like a different app to macOS and dropped the grants. The microphone re-prompted, Accessibility did not — it just denied silently, and the automatic paste stopped working with no explanation.
+
+Moving to the signed builds changes the identity one last time, so the permissions have to be granted once more. In the Accessibility settings, remove Dictea from the list and add it back; unchecking and rechecking leaves the stale entry in place.
 
 ## Development
 
@@ -123,6 +131,8 @@ ui/
 | `make kill` | Kill running processes |
 | `make logs` | Tail application logs |
 | `make release VERSION=x.y.z` | Tag & push a release |
+
+Releases are signed with the certificate produced by `scripts/generate-signing-cert.sh` (run once, stored as the `APPLE_CERTIFICATE` and `APPLE_CERTIFICATE_PASSWORD` repository secrets). The workflow only signs when those secrets exist.
 
 Config is stored in `~/Library/Application Support/com.dictea.app/`.
 
