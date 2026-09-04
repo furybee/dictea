@@ -1,6 +1,5 @@
 import { useEffect } from "react";
-import { getVersion } from "@tauri-apps/api/app";
-import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useI18n, type AppLang } from "../../i18n";
 import { useUpdater } from "../../hooks/useUpdater";
 import { useAudioDevices } from "../../hooks/useAudioDevices";
@@ -15,12 +14,6 @@ export function SettingsPage({ audioDevice, setAudioDevice }: SettingsPageProps)
   const { status, version, checkAndDownload, dismiss } = useUpdater();
   const { devices, level, refreshDevices, startPreview, stopPreview } =
     useAudioDevices();
-  const [appVersion, setAppVersion] = useState("");
-
-  useEffect(() => {
-    getVersion().then(setAppVersion);
-  }, []);
-
   useEffect(() => {
     refreshDevices();
     startPreview(audioDevice);
@@ -103,13 +96,30 @@ export function SettingsPage({ audioDevice, setAudioDevice }: SettingsPageProps)
         </div>
       </div>
 
-      <div className="settings-section">
-        <div className="about-content">
-          <p>
-            <strong>Dictea</strong> v{appVersion}
-          </p>
+      <div className="section-separator" />
+
+      <div className="donate-banner">
+        <h2>{t("donate")}</h2>
+        <p>{t("donate_hint")}</p>
+        <div className="donate-row">
+          {[
+            { id: "coffee", label: t("donate_coffee") },
+            { id: "card", label: t("donate_card") },
+            { id: "paypal", label: "PayPal" },
+          ].map((link) => (
+            <button
+              key={link.id}
+              className="btn-donate"
+              onClick={() =>
+                invoke("open_donation_link", { target: link.id }).catch(console.error)
+              }
+            >
+              {link.label}
+            </button>
+          ))}
         </div>
       </div>
+
     </>
   );
 }

@@ -148,6 +148,18 @@ Releases are signed with the certificate produced by `scripts/generate-signing-c
 
 Config is stored in `~/Library/Application Support/com.dictea.app/`.
 
+## Support
+
+Enjoy Dictea? Help keep it free and ad-free.
+
+| | |
+|---|---|
+| ☕ | [Buy me a coffee](https://www.buymeacoffee.com/xyugxh7bk) |
+| 💳 | [Donate by card](https://donate.stripe.com/fZeg1Sgml971dbieUU) |
+| 🅿️ | [PayPal](https://www.paypal.com/donate/?hosted_button_id=T7KZA4MLT5XTU) |
+
+The same links are in the app, under Settings.
+
 ## License
 
 MIT
