@@ -630,7 +630,53 @@ impl LanguageCheck {
     }
 }
 
-/// Report whether the Apple on-device model can be used/// Report whether the Apple on-device model can be used
+/// Check that a key is actually accepted by its provider.
+///
+/// A non-empty key is not a working one: it can be mistyped, expired or
+/// revoked, and today that only shows up mid-dictation. Each provider is
+/// probed on its model-listing endpoint, which costs nothing and needs no
+/// tokens.
+#[tauri::command]
+async fn test_provider_key(provider: String, key: String) -> Result<(), String> {
+    if key.trim().is_empty() {
+        return Err("No API key set".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let request = match provider.as_str() {
+        "openai" => client
+            .get("https://api.openai.com/v1/models")
+            .header("Authorization", format!("Bearer {}", key)),
+        "groq" => client
+            .get("https://api.groq.com/openai/v1/models")
+            .header("Authorization", format!("Bearer {}", key)),
+        "voxtral" => client
+            .get("https://api.mistral.ai/v1/models")
+            .header("Authorization", format!("Bearer {}", key)),
+        "gemini" => client
+            .get("https://generativelanguage.googleapis.com/v1beta/models")
+            .header("x-goog-api-key", key),
+        other => return Err(format!("Unknown provider: {}", other)),
+    };
+
+    let response = request
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    // The rejected-key case deserves plain words rather than a status code the
+    // user has no reason to know
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err("Key rejected by the provider".to_string());
+    }
+    Err(format!("Provider answered {}", status))
+}
+
+/// Report whether the Apple on-device model can be used
 #[tauri::command]
 fn apple_intelligence_status() -> serde_json::Value {
     let availability = apple_intelligence::availability();
@@ -1375,6 +1421,7 @@ pub fn run() {
             open_accessibility_settings,
             log_frontend_error,
             apple_intelligence_status,
+            test_provider_key,
             models::parakeet_model_status,
             models::download_parakeet_model,
             models::cancel_parakeet_download,
