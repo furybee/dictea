@@ -71,12 +71,19 @@ jobs:
       # the name straight to codesign, which signs happily with an untrusted
       # certificate as long as its keychain is in the search list.
       - name: Set up the macOS signing keychain
-        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        if: matrix.platform == 'macos-latest'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
+          # The secrets context is not available in a step-level `if`, so the
+          # "no certificate configured" case is handled here
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "No signing certificate configured, the build stays ad-hoc signed."
+            exit 0
+          fi
+
           KEYCHAIN="$RUNNER_TEMP/dictea-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
           CERT="$RUNNER_TEMP/certificate.p12"
