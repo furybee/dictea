@@ -179,7 +179,7 @@ export function EnginePage({
     gemini: {
       label: t("api_key_gemini"), hint: t("api_key_gemini_hint"),
       key: geminiApiKey, setKey: setGeminiApiKey, placeholder: "",
-      transcription: "gemini-2.5-flash", reformulation: "gemini-2.5-flash-lite",
+      transcription: "gemini-3.5-transcribe", reformulation: "gemini-2.5-flash-lite",
     },
     groq: {
       label: t("api_key_groq"), hint: t("api_key_groq_hint"),
