@@ -1,6 +1,6 @@
 {
   "name": "dictea",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Application STT locale temps réel",
   "type": "module",
   "scripts": {
