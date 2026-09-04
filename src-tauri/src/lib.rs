@@ -758,6 +758,12 @@ fn report_paste_failure(app: &AppHandle) {
     }
 }
 
+/// Surface a crash from the webview, which has no console anyone can read
+#[tauri::command]
+fn log_frontend_error(message: String) {
+    tracing::error!("Frontend error: {}", message);
+}
+
 /// Open the OS pane where the paste permission is granted
 #[tauri::command]
 fn open_accessibility_settings() {
@@ -1253,6 +1259,7 @@ pub fn run() {
             toggle_overlay,
             cancel_recording,
             open_accessibility_settings,
+            log_frontend_error,
             apple_intelligence_status,
             models::parakeet_model_status,
             models::download_parakeet_model,
