@@ -264,3 +264,35 @@ impl SttEngine for OpenAiEngine {
         self.is_ready
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hits the real API when DICTEA_OPENAI_KEY is set, skipped otherwise.
+    /// The model identifier changed and nothing else here can prove the
+    /// endpoint still accepts it.
+    #[tokio::test]
+    async fn transcribes_through_the_live_api() {
+        let Ok(key) = std::env::var("DICTEA_OPENAI_KEY") else {
+            eprintln!("DICTEA_OPENAI_KEY not set, skipping");
+            return;
+        };
+        let wav = std::env::var("DICTEA_TEST_WAV").unwrap_or_else(|_| "/tmp/s.wav".to_string());
+        let Ok(mut reader) = hound::WavReader::open(&wav) else {
+            eprintln!("{} not found, skipping", wav);
+            return;
+        };
+        let samples: Vec<f32> = reader
+            .samples::<i16>()
+            .filter_map(Result::ok)
+            .map(|s| s as f32 / 32768.0)
+            .collect();
+
+        let text = OpenAiEngine::transcribe_async(reqwest::Client::new(), key, samples, None)
+            .await
+            .expect("transcription should succeed");
+        eprintln!("transcript: {}", text);
+        assert!(!text.trim().is_empty());
+    }
+}
