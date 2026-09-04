@@ -630,6 +630,10 @@ body {
   color: #34d399;
 }
 
+.model-status-warn {
+  color: #fbbf24;
+}
+
 .model-download {
   max-width: 380px;
 }
