@@ -14,8 +14,8 @@ interface EnginePageProps {
   setGroqApiKey: (v: string) => void;
   sttEngine: string;
   setSttEngine: (v: string) => void;
-  parakeetReformProvider: string;
-  setParakeetReformProvider: (v: string) => void;
+  reformProvider: string;
+  setReformProvider: (v: string) => void;
 }
 
 interface ParakeetModelStatus {
@@ -179,8 +179,8 @@ export function EnginePage({
   setGroqApiKey,
   sttEngine,
   setSttEngine,
-  parakeetReformProvider,
-  setParakeetReformProvider,
+  reformProvider,
+  setReformProvider,
 }: EnginePageProps) {
   const { t } = useI18n();
   const [appleStatus, setAppleStatus] = useState<AppleStatus | null>(null);
@@ -194,7 +194,6 @@ export function EnginePage({
   // Hide the option entirely off macOS rather than offer something that
   // can never work there
   const appleSupported = appleStatus !== null && appleStatus.availability !== "unsupported_os";
-  const isApple = parakeetReformProvider === "apple";
 
   const engineConfig: Record<string, {
     label: string; hint: string; key: string;
@@ -225,7 +224,16 @@ export function EnginePage({
 
   const isParakeet = sttEngine === "parakeet";
   const current = engineConfig[sttEngine] || engineConfig.openai;
-  const reformProvider = engineConfig[parakeetReformProvider] || engineConfig.openai;
+
+  // Mirrors resolve_reformulation_provider on the Rust side: auto follows the
+  // STT engine, and the local engine cannot rewrite its own output
+  const resolvedProvider =
+    reformProvider === "auto" ? (isParakeet ? "openai" : sttEngine) : reformProvider;
+  const isApple = resolvedProvider === "apple";
+  const reformConfig = engineConfig[resolvedProvider] || engineConfig.openai;
+
+  // Its key is already asked for above when it is also the STT engine
+  const needsOwnKey = !isApple && resolvedProvider !== sttEngine;
 
   return (
     <>
@@ -247,88 +255,74 @@ export function EnginePage({
         </select>
       </div>
 
+      {/* The local engine has a model to fetch, the others a key to enter */}
       {isParakeet ? (
-        <>
-          <ParakeetModelSection />
-
-          <div className="settings-section">
-            <h2>{t("reformulation_provider")}</h2>
-            <p className="hint">{t("parakeet_reformulate_hint")}</p>
-            <select
-              className="settings-select"
-              value={parakeetReformProvider}
-              onChange={(e) => setParakeetReformProvider(e.target.value)}
-            >
-              {appleSupported && <option value="apple">{t("apple_intelligence")}</option>}
-              <option value="openai">OpenAI</option>
-              <option value="groq">Groq</option>
-              <option value="voxtral">Mistral</option>
-              <option value="gemini">Gemini (Google)</option>
-            </select>
-          </div>
-
-          {isApple ? (
-            <AppleIntelligenceSection status={appleStatus} />
-          ) : (
-            <div className="settings-section">
-              <h2>{reformProvider.label}</h2>
-              <p className="hint">{reformProvider.hint}</p>
-              <input
-                type="password"
-                className="settings-input"
-                value={reformProvider.key}
-                onChange={(e) => reformProvider.setKey(e.target.value)}
-                placeholder={reformProvider.placeholder}
-              />
-            </div>
-          )}
-
-          <div className="settings-section">
-            <h2>{t("models_used")}</h2>
-            <div className="models-list">
-              <div className="model-item">
-                <span className="model-label">{t("model_transcription")}</span>
-                <code className="model-name">parakeet-tdt-0.6b-v3 (local)</code>
-              </div>
-              <div className="model-item">
-                <span className="model-label">{t("model_reformulation")}</span>
-                <code className="model-name">
-                  {isApple ? "apple on-device (local)" : reformProvider.reformulation}
-                </code>
-              </div>
-            </div>
-          </div>
-        </>
+        <ParakeetModelSection />
       ) : (
-        <>
-          <div className="settings-section">
-            <h2>{current.label}</h2>
-            <p className="hint">{current.hint}</p>
-            <input
-              type="password"
-              className="settings-input"
-              value={current.key}
-              onChange={(e) => current.setKey(e.target.value)}
-              placeholder={current.placeholder}
-            />
-          </div>
-
-          <div className="settings-section">
-            <h2>{t("models_used")}</h2>
-            <p className="hint">{t("models_used_hint")}</p>
-            <div className="models-list">
-              <div className="model-item">
-                <span className="model-label">{t("model_transcription")}</span>
-                <code className="model-name">{current.transcription}</code>
-              </div>
-              <div className="model-item">
-                <span className="model-label">{t("model_reformulation")}</span>
-                <code className="model-name">{current.reformulation}</code>
-              </div>
-            </div>
-          </div>
-        </>
+        <div className="settings-section">
+          <h2>{current.label}</h2>
+          <p className="hint">{current.hint}</p>
+          <input
+            type="password"
+            className="settings-input"
+            value={current.key}
+            onChange={(e) => current.setKey(e.target.value)}
+            placeholder={current.placeholder}
+          />
+        </div>
       )}
+
+      <div className="settings-section">
+        <h2>{t("reformulation_provider")}</h2>
+        <p className="hint">{t("reformulation_provider_hint")}</p>
+        <select
+          className="settings-select"
+          value={reformProvider}
+          onChange={(e) => setReformProvider(e.target.value)}
+        >
+          <option value="auto">{t("reformulation_auto")}</option>
+          {appleSupported && <option value="apple">{t("apple_intelligence")}</option>}
+          <option value="openai">OpenAI</option>
+          <option value="groq">Groq</option>
+          <option value="voxtral">Mistral</option>
+          <option value="gemini">Gemini (Google)</option>
+        </select>
+      </div>
+
+      {isApple && <AppleIntelligenceSection status={appleStatus} />}
+
+      {/* A provider that is not the STT engine needs its own key */}
+      {needsOwnKey && (
+        <div className="settings-section">
+          <h2>{reformConfig.label}</h2>
+          <p className="hint">{reformConfig.hint}</p>
+          <input
+            type="password"
+            className="settings-input"
+            value={reformConfig.key}
+            onChange={(e) => reformConfig.setKey(e.target.value)}
+            placeholder={reformConfig.placeholder}
+          />
+        </div>
+      )}
+
+      <div className="settings-section">
+        <h2>{t("models_used")}</h2>
+        <div className="models-list">
+          <div className="model-item">
+            <span className="model-label">{t("model_transcription")}</span>
+            <code className="model-name">
+              {isParakeet ? "parakeet-tdt-0.6b-v3 (local)" : current.transcription}
+            </code>
+          </div>
+          <div className="model-item">
+            <span className="model-label">{t("model_reformulation")}</span>
+            <code className="model-name">
+              {isApple ? "apple on-device (local)" : reformConfig.reformulation}
+            </code>
+          </div>
+        </div>
+      </div>
     </>
   );
 }

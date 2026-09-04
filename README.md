@@ -34,6 +34,12 @@ Intelligent voice dictation for macOS. Press a shortcut to start, speak, press a
 
 **Parakeet** runs 100% locally: no audio ever leaves your machine. It supports 25 European languages with automatic language detection. The model is loaded at startup so the first dictation is instant. Reformulation and translation stay optional — pick any chat provider in the settings, or leave its key empty and the transcription is pasted as-is (still fully local).
 
+### Reformulation provider
+
+Transcription and reformulation are two separate steps, and the settings let you pick who does the second one regardless of who did the first. It defaults to **Automatic**, which follows the STT engine — the behaviour before it was configurable.
+
+Naming one explicitly is what makes the interesting combinations possible: cloud transcription with on-device rewriting, or a cheap transcriber paired with a stronger rewriter. Leave the chosen provider's key empty and the transcription is simply pasted as-is.
+
 ### Fully local dictation (macOS 26+)
 
 Pairing **Parakeet** with **Apple Intelligence** as the reformulation provider keeps the entire pipeline on the machine — audio and text alike, no API key, no network. It uses the model built into macOS through the `FoundationModels` framework, so there is nothing extra to download.
