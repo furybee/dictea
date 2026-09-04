@@ -91,7 +91,10 @@ impl OpenAiEngine {
 
         let mut form = reqwest::multipart::Form::new()
             .part("file", file_part)
-            .text("model", "gpt-4o-transcribe");
+            // gpt-transcribe replaced gpt-4o-transcribe as the recommended
+            // model for completed files: same endpoint, 25% cheaper
+            // ($0.0045/min against $0.006), lower word error rate.
+            .text("model", "gpt-transcribe");
 
         if let Some(lang) = language {
             form = form.text("language", lang);

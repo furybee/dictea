@@ -88,7 +88,9 @@ impl VoxtralEngine {
 
         let mut form = reqwest::multipart::Form::new()
             .part("file", file_part)
-            .text("model", "voxtral-mini-latest");
+            // Mistral no longer publishes -latest aliases, so the dated id is
+            // now the only supported way to name the model
+            .text("model", "voxtral-mini-2602");
 
         // Add language if specified
         if let Some(lang) = language {

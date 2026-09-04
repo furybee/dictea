@@ -26,10 +26,10 @@ Intelligent voice dictation for macOS. Press a shortcut to start, speak, press a
 
 | Engine | Transcription model | Reformulation model | API key |
 |--------|--------------------|--------------------|---------|
-| **OpenAI** | `gpt-4o-transcribe` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com/api-keys) |
+| **OpenAI** | `gpt-transcribe` | `gpt-4o-mini` | [platform.openai.com](https://platform.openai.com/api-keys) |
 | **Groq** | `whisper-large-v3-turbo` | `llama-3.3-70b-versatile` | [console.groq.com](https://console.groq.com/keys) |
-| **Voxtral** (Mistral) | `voxtral-mini-latest` | `mistral-small-latest` | [console.mistral.ai](https://console.mistral.ai/api-keys) |
-| **Gemini** (Google) | `gemini-2.5-flash` | `gemini-2.5-flash-lite` | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| **Voxtral** (Mistral) | `voxtral-mini-2602` | `mistral-small-latest` | [console.mistral.ai](https://console.mistral.ai/api-keys) |
+| **Gemini** (Google) | `gemini-3.5-transcribe` | `gemini-2.5-flash-lite` | [aistudio.google.com](https://aistudio.google.com/apikey) |
 | **Parakeet** (NVIDIA, local) | `parakeet-tdt-0.6b-v3` via ONNX Runtime | provider of your choice (optional) | none — model (~670 MB) downloaded from the settings |
 
 **Parakeet** runs 100% locally: no audio ever leaves your machine. It supports 25 European languages with automatic language detection. The model is loaded at startup so the first dictation is instant. Reformulation and translation stay optional — pick any chat provider in the settings, or leave its key empty and the transcription is pasted as-is (still fully local).

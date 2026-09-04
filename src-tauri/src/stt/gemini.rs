@@ -1,7 +1,8 @@
 //! Gemini implementation for STT
 //!
 //! Accumulates all audio, then sends in a single call on flush (stop).
-//! Uses the multimodal generateContent API with base64-encoded audio.
+//! Uses gemini-3.5-transcribe, the dedicated speech model, through the
+//! /v1beta/interactions endpoint with base64-encoded audio.
 
 use super::engine::{Language, SttEngine, SttError, SttEvent};
 use base64::Engine as _;
@@ -65,7 +66,14 @@ impl GeminiEngine {
         Ok(cursor.into_inner())
     }
 
-    /// Run inference via the Gemini generateContent API
+    /// Run inference via the Gemini transcription API
+    ///
+    /// gemini-3.5-transcribe is a dedicated speech model and does not answer on
+    /// generateContent like the general-purpose ones: it lives behind
+    /// /v1beta/interactions, takes the audio as an input item rather than a
+    /// content part, and replaces the "transcribe this" prompt with a
+    /// transcription_config. Audio is still sent inline, so no upload through
+    /// the Files API is needed for dictation-sized clips.
     async fn transcribe_async(
         client: reqwest::Client,
         api_key: String,
@@ -82,36 +90,25 @@ impl GeminiEngine {
             wav_data.len()
         );
 
-        let prompt = match language {
-            Some(lang) => format!(
-                "Transcribe this audio exactly as spoken in {}. Return only the transcription, nothing else.",
-                lang
-            ),
-            None => "Transcribe this audio exactly as spoken. Return only the transcription, nothing else.".to_string(),
-        };
+        // An empty list means auto-detection, which is what Auto maps to
+        let language_codes: Vec<String> = language.into_iter().collect();
 
         let body = serde_json::json!({
-            "contents": [{
-                "parts": [
-                    {
-                        "inline_data": {
-                            "mime_type": "audio/wav",
-                            "data": audio_base64
-                        }
-                    },
-                    {
-                        "text": prompt
-                    }
-                ]
-            }]
+            "model": "gemini-3.5-transcribe",
+            "input": [{
+                "type": "audio",
+                "data": audio_base64,
+                "mime_type": "audio/wav"
+            }],
+            "generation_config": {
+                "transcription_config": {
+                    "language_codes": language_codes
+                }
+            }
         });
 
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-        );
-
         let response = client
-            .post(&url)
+            .post("https://generativelanguage.googleapis.com/v1beta/interactions")
             .header("x-goog-api-key", &api_key)
             .header("Content-Type", "application/json")
             .json(&body)
@@ -133,9 +130,32 @@ impl GeminiEngine {
             .await
             .map_err(|e| SttError::InferenceError(format!("JSON parse error: {}", e)))?;
 
-        let text = json["candidates"][0]["content"]["parts"][0]["text"]
-            .as_str()
-            .unwrap_or("")
+        // Anything other than "completed" means there is no transcript to read,
+        // and silently returning an empty string would look like silence
+        if let Some(status) = json["status"].as_str() {
+            if status != "completed" {
+                return Err(SttError::InferenceError(format!(
+                    "Gemini transcription {}: {}",
+                    status, json
+                )));
+            }
+        }
+
+        // The transcript is spread over the text parts of the model_output
+        // steps — there is no top-level field holding it
+        let text = json["steps"]
+            .as_array()
+            .map(|steps| {
+                steps
+                    .iter()
+                    .filter_map(|step| step["content"].as_array())
+                    .flatten()
+                    .filter(|part| part["type"] == "text")
+                    .filter_map(|part| part["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .unwrap_or_default()
             .trim()
             .to_string();
 
@@ -283,5 +303,49 @@ impl Default for GeminiEngine {
             pending: Arc::new(AtomicBool::new(false)),
             http_client: reqwest::Client::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hits the real API when DICTEA_GEMINI_KEY is set, and is skipped
+    /// otherwise (CI has no key).
+    ///
+    /// Worth the round trip: the transcription endpoint has nothing in common
+    /// with generateContent, and the transcript is buried in the steps rather
+    /// than exposed at the top level. Only a live call proves the request and
+    /// the parser still agree with the API.
+    ///
+    /// Generate the fixture with:
+    ///   say -v Thomas -o /tmp/g.aiff "Bonjour, ceci est un test"
+    ///   afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/g.aiff /tmp/g.wav
+    #[tokio::test]
+    async fn transcribes_a_wav_through_the_live_api() {
+        let Ok(key) = std::env::var("DICTEA_GEMINI_KEY") else {
+            eprintln!("DICTEA_GEMINI_KEY not set, skipping");
+            return;
+        };
+        let wav_path =
+            std::env::var("DICTEA_TEST_WAV").unwrap_or_else(|_| "/tmp/g.wav".to_string());
+        let Ok(mut reader) = hound::WavReader::open(&wav_path) else {
+            eprintln!("{} not found, skipping", wav_path);
+            return;
+        };
+
+        let samples: Vec<f32> = reader
+            .samples::<i16>()
+            .filter_map(Result::ok)
+            .map(|s| s as f32 / 32768.0)
+            .collect();
+        assert!(!samples.is_empty(), "fixture has no audio");
+
+        let text = GeminiEngine::transcribe_async(reqwest::Client::new(), key, samples, None)
+            .await
+            .expect("transcription should succeed");
+
+        eprintln!("transcript: {}", text);
+        assert!(!text.trim().is_empty(), "transcript is empty");
     }
 }
