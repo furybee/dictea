@@ -169,12 +169,12 @@ export function EnginePage({
     openai: {
       label: t("api_key"), hint: t("api_key_hint"),
       key: apiKey, setKey: setApiKey, placeholder: "sk-...",
-      transcription: "gpt-4o-transcribe", reformulation: "gpt-4o-mini",
+      transcription: "gpt-transcribe", reformulation: "gpt-4o-mini",
     },
     voxtral: {
       label: t("api_key_mistral"), hint: t("api_key_mistral_hint"),
       key: mistralApiKey, setKey: setMistralApiKey, placeholder: "",
-      transcription: "voxtral-mini-latest", reformulation: "mistral-small-latest",
+      transcription: "voxtral-mini-2602", reformulation: "mistral-small-latest",
     },
     gemini: {
       label: t("api_key_gemini"), hint: t("api_key_gemini_hint"),
