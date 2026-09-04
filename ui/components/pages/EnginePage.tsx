@@ -1,243 +1,103 @@
-import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useI18n } from "../../i18n";
+import { useLocalProviders } from "../../hooks/useLocalProviders";
 
 interface EnginePageProps {
   apiKey: string;
-  setApiKey: (v: string) => void;
   mistralApiKey: string;
-  setMistralApiKey: (v: string) => void;
   geminiApiKey: string;
-  setGeminiApiKey: (v: string) => void;
   groqApiKey: string;
-  setGroqApiKey: (v: string) => void;
   sttEngine: string;
   setSttEngine: (v: string) => void;
   reformProvider: string;
   setReformProvider: (v: string) => void;
+  onGoToProviders: () => void;
 }
 
-interface ParakeetModelStatus {
-  downloaded: boolean;
-  downloading: boolean;
-  path: string;
-}
-
-interface DownloadProgress {
-  file: string;
-  file_index: number;
-  file_count: number;
-  downloaded: number;
-  total: number;
-}
-
-function formatMB(bytes: number): string {
-  return (bytes / (1024 * 1024)).toFixed(0);
-}
-
-interface AppleStatus {
-  availability: string;
-  message: string;
-}
-
-function AppleIntelligenceSection({ status }: { status: AppleStatus | null }) {
-  const { t } = useI18n();
-  const ready = status?.availability === "available";
-
-  return (
-    <div className="settings-section">
-      <h2>{t("apple_intelligence")}</h2>
-      <p className="hint">{t("apple_intelligence_hint")}</p>
-      <div className="model-status-row">
-        <span className={`model-status-badge${ready ? " model-status-ok" : " model-status-warn"}`}>
-          {ready ? "✓" : "!"} {status?.message ?? "…"}
-        </span>
-      </div>
-      {!ready && <p className="hint">{t("apple_unavailable_note")}</p>}
-    </div>
-  );
-}
-
-function ParakeetModelSection() {
-  const { t } = useI18n();
-  const [status, setStatus] = useState<ParakeetModelStatus | null>(null);
-  const [progress, setProgress] = useState<DownloadProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(() => {
-    invoke<ParakeetModelStatus>("parakeet_model_status")
-      .then(setStatus)
-      .catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const unlistenProgress = listen<DownloadProgress>("parakeet_download_progress", (e) => {
-      setProgress(e.payload);
-    });
-    const unlistenDone = listen("parakeet_download_done", () => {
-      setProgress(null);
-      refresh();
-    });
-    const unlistenError = listen<string>("parakeet_download_error", (e) => {
-      setProgress(null);
-      setError(e.payload);
-      refresh();
-    });
-    const unlistenCancelled = listen("parakeet_download_cancelled", () => {
-      setProgress(null);
-      refresh();
-    });
-    return () => {
-      unlistenProgress.then((fn) => fn());
-      unlistenDone.then((fn) => fn());
-      unlistenError.then((fn) => fn());
-      unlistenCancelled.then((fn) => fn());
-    };
-  }, [refresh]);
-
-  const startDownload = () => {
-    setError(null);
-    setStatus((s) => (s ? { ...s, downloading: true } : s));
-    invoke("download_parakeet_model").catch((e) => {
-      setError(String(e));
-      refresh();
-    });
-  };
-
-  const cancelDownload = () => {
-    invoke("cancel_parakeet_download").catch(console.error);
-  };
-
-  const deleteModel = () => {
-    invoke("delete_parakeet_model")
-      .then(refresh)
-      .catch((e) => setError(String(e)));
-  };
-
-  const percent =
-    progress && progress.total > 0
-      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
-      : 0;
-
-  return (
-    <div className="settings-section">
-      <h2>{t("parakeet_model")}</h2>
-      <p className="hint">{t("parakeet_model_hint")}</p>
-
-      {status?.downloading ? (
-        <div className="model-download">
-          <div className="model-status-row">
-            <span className="model-status-text">
-              {t("downloading_model")} ({progress ? `${progress.file_index}/${progress.file_count}` : "..."})
-              {progress && progress.total > 0 && (
-                <> — {formatMB(progress.downloaded)} / {formatMB(progress.total)} Mo</>
-              )}
-            </span>
-            <button className="btn-secondary" onClick={cancelDownload}>
-              {t("cancel_download")}
-            </button>
-          </div>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${percent}%` }} />
-          </div>
-        </div>
-      ) : status?.downloaded ? (
-        <div className="model-status-row">
-          <span className="model-status-badge model-status-ok">✓ {t("model_downloaded")}</span>
-          <button className="btn-secondary" onClick={deleteModel}>
-            {t("delete_model")}
-          </button>
-        </div>
-      ) : (
-        <div className="model-status-row">
-          <span className="model-status-text">{t("model_not_downloaded")}</span>
-          <button className="btn-primary" onClick={startDownload}>
-            {t("download_model")}
-          </button>
-        </div>
-      )}
-
-      {error && (
-        <p className="model-error">
-          {t("download_error")}: {error}
-        </p>
-      )}
-    </div>
-  );
+interface Choice {
+  id: string;
+  label: string;
+  transcription?: string;
+  reformulation?: string;
+  ready: boolean;
 }
 
 export function EnginePage({
   apiKey,
-  setApiKey,
   mistralApiKey,
-  setMistralApiKey,
   geminiApiKey,
-  setGeminiApiKey,
   groqApiKey,
-  setGroqApiKey,
   sttEngine,
   setSttEngine,
   reformProvider,
   setReformProvider,
+  onGoToProviders,
 }: EnginePageProps) {
   const { t } = useI18n();
-  const [appleStatus, setAppleStatus] = useState<AppleStatus | null>(null);
+  const { parakeetReady, appleReady, appleSupported } = useLocalProviders();
 
-  useEffect(() => {
-    invoke<AppleStatus>("apple_intelligence_status")
-      .then(setAppleStatus)
-      .catch(console.error);
-  }, []);
+  // Configured means the provider has what it needs to run: a key for the API
+  // ones, a downloaded model for Parakeet, an enabled OS feature for Apple.
+  const engines: Choice[] = [
+    { id: "openai", label: t("openai_api"), transcription: "gpt-transcribe", reformulation: "gpt-4o-mini", ready: !!apiKey },
+    { id: "groq", label: t("groq_api"), transcription: "whisper-large-v3-turbo", reformulation: "llama-3.3-70b-versatile", ready: !!groqApiKey },
+    { id: "voxtral", label: t("voxtral_api"), transcription: "voxtral-mini-2602", reformulation: "mistral-small-latest", ready: !!mistralApiKey },
+    { id: "gemini", label: t("gemini_api"), transcription: "gemini-3.5-transcribe", reformulation: "gemini-2.5-flash-lite", ready: !!geminiApiKey },
+    { id: "parakeet", label: t("parakeet_api"), transcription: "parakeet-tdt-0.6b-v3 (local)", ready: parakeetReady },
+  ];
 
-  // Hide the option entirely off macOS rather than offer something that
-  // can never work there
-  const appleSupported = appleStatus !== null && appleStatus.availability !== "unsupported_os";
+  const providers: Choice[] = [
+    { id: "auto", label: t("reformulation_auto"), ready: true },
+    ...(appleSupported
+      ? [
+          {
+            id: "apple",
+            label: t("apple_intelligence"),
+            reformulation: "apple on-device (local)",
+            ready: appleReady,
+          },
+        ]
+      : []),
+    ...engines.filter((e) => e.id !== "parakeet"),
+  ];
 
-  const engineConfig: Record<string, {
-    label: string; hint: string; key: string;
-    setKey: (v: string) => void; placeholder: string;
-    transcription: string; reformulation: string;
-  }> = {
-    openai: {
-      label: t("api_key"), hint: t("api_key_hint"),
-      key: apiKey, setKey: setApiKey, placeholder: "sk-...",
-      transcription: "gpt-transcribe", reformulation: "gpt-4o-mini",
-    },
-    voxtral: {
-      label: t("api_key_mistral"), hint: t("api_key_mistral_hint"),
-      key: mistralApiKey, setKey: setMistralApiKey, placeholder: "",
-      transcription: "voxtral-mini-2602", reformulation: "mistral-small-latest",
-    },
-    gemini: {
-      label: t("api_key_gemini"), hint: t("api_key_gemini_hint"),
-      key: geminiApiKey, setKey: setGeminiApiKey, placeholder: "",
-      transcription: "gemini-3.5-transcribe", reformulation: "gemini-2.5-flash-lite",
-    },
-    groq: {
-      label: t("api_key_groq"), hint: t("api_key_groq_hint"),
-      key: groqApiKey, setKey: setGroqApiKey, placeholder: "gsk_...",
-      transcription: "whisper-large-v3-turbo", reformulation: "llama-3.3-70b-versatile",
-    },
-  };
-
-  const isParakeet = sttEngine === "parakeet";
-  const current = engineConfig[sttEngine] || engineConfig.openai;
-
-  // Mirrors resolve_reformulation_provider on the Rust side: auto follows the
-  // STT engine, and the local engine cannot rewrite its own output
+  const current = engines.find((e) => e.id === sttEngine) ?? engines[0];
+  // Mirrors resolve_reformulation_provider on the Rust side
   const resolvedProvider =
-    reformProvider === "auto" ? (isParakeet ? "openai" : sttEngine) : reformProvider;
-  const isApple = resolvedProvider === "apple";
-  const reformConfig = engineConfig[resolvedProvider] || engineConfig.openai;
+    reformProvider === "auto"
+      ? sttEngine === "parakeet"
+        ? "openai"
+        : sttEngine
+      : reformProvider;
+  const reform = providers.find((p) => p.id === resolvedProvider) ?? providers[0];
 
-  // Its key is already asked for above when it is also the STT engine
-  const needsOwnKey = !isApple && resolvedProvider !== sttEngine;
+  // Unconfigured options stay listed rather than disappearing: an option that
+  // vanishes cannot be discovered, and makes the app look broken.
+  const option = (c: Choice) => (
+    <option key={c.id} value={c.id} disabled={!c.ready}>
+      {c.label}
+      {c.ready ? "" : ` — ${t("not_configured")}`}
+    </option>
+  );
+
+  const missing = !current.ready || !reform.ready;
 
   return (
     <>
       <h2 className="page-title">{t("page_engine")}</h2>
+
+      {missing && (
+        <div className="alert-banner">
+          <div className="alert-banner-text">
+            <strong>{t("provider_missing_title")}</strong>
+            <p>{t("provider_missing_body")}</p>
+          </div>
+          <div className="alert-banner-actions">
+            <button className="btn-primary" onClick={onGoToProviders}>
+              {t("open_providers")}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="settings-section">
         <h2>{t("stt_engine")}</h2>
@@ -247,30 +107,9 @@ export function EnginePage({
           value={sttEngine}
           onChange={(e) => setSttEngine(e.target.value)}
         >
-          <option value="openai">{t("openai_api")}</option>
-          <option value="groq">{t("groq_api")}</option>
-          <option value="voxtral">{t("voxtral_api")}</option>
-          <option value="gemini">{t("gemini_api")}</option>
-          <option value="parakeet">{t("parakeet_api")}</option>
+          {engines.map(option)}
         </select>
       </div>
-
-      {/* The local engine has a model to fetch, the others a key to enter */}
-      {isParakeet ? (
-        <ParakeetModelSection />
-      ) : (
-        <div className="settings-section">
-          <h2>{current.label}</h2>
-          <p className="hint">{current.hint}</p>
-          <input
-            type="password"
-            className="settings-input"
-            value={current.key}
-            onChange={(e) => current.setKey(e.target.value)}
-            placeholder={current.placeholder}
-          />
-        </div>
-      )}
 
       <div className="settings-section">
         <h2>{t("reformulation_provider")}</h2>
@@ -280,46 +119,20 @@ export function EnginePage({
           value={reformProvider}
           onChange={(e) => setReformProvider(e.target.value)}
         >
-          <option value="auto">{t("reformulation_auto")}</option>
-          {appleSupported && <option value="apple">{t("apple_intelligence")}</option>}
-          <option value="openai">OpenAI</option>
-          <option value="groq">Groq</option>
-          <option value="voxtral">Mistral</option>
-          <option value="gemini">Gemini (Google)</option>
+          {providers.map(option)}
         </select>
       </div>
-
-      {isApple && <AppleIntelligenceSection status={appleStatus} />}
-
-      {/* A provider that is not the STT engine needs its own key */}
-      {needsOwnKey && (
-        <div className="settings-section">
-          <h2>{reformConfig.label}</h2>
-          <p className="hint">{reformConfig.hint}</p>
-          <input
-            type="password"
-            className="settings-input"
-            value={reformConfig.key}
-            onChange={(e) => reformConfig.setKey(e.target.value)}
-            placeholder={reformConfig.placeholder}
-          />
-        </div>
-      )}
 
       <div className="settings-section">
         <h2>{t("models_used")}</h2>
         <div className="models-list">
           <div className="model-item">
             <span className="model-label">{t("model_transcription")}</span>
-            <code className="model-name">
-              {isParakeet ? "parakeet-tdt-0.6b-v3 (local)" : current.transcription}
-            </code>
+            <code className="model-name">{current.transcription}</code>
           </div>
           <div className="model-item">
             <span className="model-label">{t("model_reformulation")}</span>
-            <code className="model-name">
-              {isApple ? "apple on-device (local)" : reformConfig.reformulation}
-            </code>
+            <code className="model-name">{reform.reformulation ?? "—"}</code>
           </div>
         </div>
       </div>

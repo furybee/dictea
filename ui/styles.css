@@ -184,6 +184,7 @@ body {
 /* Per-page item colors */
 .sidebar-item[data-page="dictation"] { --item-color: 99, 102, 241; }
 .sidebar-item[data-page="engine"] { --item-color: 245, 158, 11; }
+.sidebar-item[data-page="providers"] { --item-color: 56, 189, 248; }
 .sidebar-item[data-page="shortcut"] { --item-color: 16, 185, 129; }
 .sidebar-item[data-page="settings"] { --item-color: 139, 92, 246; }
 
@@ -204,6 +205,11 @@ body {
 .sidebar-item[data-page="engine"]:hover .item-icon,
 .sidebar-item[data-page="engine"].active .item-icon {
   color: #fbbf24;
+}
+
+.sidebar-item[data-page="providers"]:hover .item-icon,
+.sidebar-item[data-page="providers"].active .item-icon {
+  color: #38bdf8;
 }
 
 .sidebar-item[data-page="shortcut"]:hover .item-icon,
@@ -930,4 +936,54 @@ body {
   border-radius: 4px;
   background: linear-gradient(90deg, #6366f1, #10b981);
   transition: width 80ms ease-out;
+}
+
+/* ============================================
+   PROVIDERS
+   ============================================ */
+
+.page-intro {
+  margin-bottom: 8px;
+}
+
+.provider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.provider-usage {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.provider-row .settings-input {
+  flex: 1;
+}
+
+.settings-select option:disabled {
+  color: var(--text-secondary);
+}
+
+.provider-group {
+  margin-top: 22px;
+  margin-bottom: 2px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.provider-group:first-of-type {
+  margin-top: 8px;
 }

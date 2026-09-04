@@ -13,11 +13,12 @@ export interface AppConfig {
   reformulation_provider: string;
 }
 
-export type Page = "dictation" | "engine" | "shortcut" | "settings";
+export type Page = "dictation" | "engine" | "providers" | "shortcut" | "settings";
 
 export const PAGE_GLOW_COLORS: Record<Page, string> = {
   dictation: "99, 102, 241",
   engine: "245, 158, 11",
+  providers: "56, 189, 248",
   shortcut: "16, 185, 129",
   settings: "139, 92, 246",
 };

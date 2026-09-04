@@ -1,4 +1,4 @@
-import { Mic, Zap, Keyboard, Settings } from "lucide-react";
+import { Mic, Zap, Keyboard, Settings, KeyRound } from "lucide-react";
 import { useI18n, type TranslationKey } from "../i18n";
 import type { Page } from "../types";
 
@@ -11,6 +11,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: "dictation", labelKey: "nav_dictation", icon: <Mic size={18} /> },
   { id: "engine", labelKey: "nav_engine", icon: <Zap size={18} /> },
+  { id: "providers", labelKey: "nav_providers", icon: <KeyRound size={18} /> },
   { id: "shortcut", labelKey: "nav_shortcut", icon: <Keyboard size={18} /> },
 ];
 

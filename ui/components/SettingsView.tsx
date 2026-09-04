@@ -5,6 +5,7 @@ import { useI18n } from "../i18n";
 import { Sidebar } from "./Sidebar";
 import { DictationPage } from "./pages/DictationPage";
 import { EnginePage } from "./pages/EnginePage";
+import { ProvidersPage } from "./pages/ProvidersPage";
 import { ShortcutPage } from "./pages/ShortcutPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { useConfig } from "../hooks/useConfig";
@@ -79,6 +80,20 @@ export function SettingsView() {
           {activePage === "engine" && (
             <EnginePage
               apiKey={config.apiKey}
+              mistralApiKey={config.mistralApiKey}
+              geminiApiKey={config.geminiApiKey}
+              groqApiKey={config.groqApiKey}
+              sttEngine={config.sttEngine}
+              setSttEngine={config.setSttEngine}
+              reformProvider={config.reformProvider}
+              setReformProvider={config.setReformProvider}
+              onGoToProviders={() => setActivePage("providers")}
+            />
+          )}
+
+          {activePage === "providers" && (
+            <ProvidersPage
+              apiKey={config.apiKey}
               setApiKey={config.setApiKey}
               mistralApiKey={config.mistralApiKey}
               setMistralApiKey={config.setMistralApiKey}
@@ -86,10 +101,6 @@ export function SettingsView() {
               setGeminiApiKey={config.setGeminiApiKey}
               groqApiKey={config.groqApiKey}
               setGroqApiKey={config.setGroqApiKey}
-              sttEngine={config.sttEngine}
-              setSttEngine={config.setSttEngine}
-              reformProvider={config.reformProvider}
-              setReformProvider={config.setReformProvider}
             />
           )}
 
