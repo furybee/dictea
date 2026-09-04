@@ -40,6 +40,10 @@ futures-util = "0.3"
 # STT local NVIDIA Parakeet (ONNX Runtime)
 parakeet-rs = "0.3.7"
 
+# Detection de langue : le modele on-device doit se voir nommer la langue,
+# et sa sortie doit etre verifiee
+whatlang = "0.18"
+
 # Encodage audio WAV
 hound = "3.5"
 

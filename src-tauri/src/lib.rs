@@ -559,7 +559,78 @@ fn resolve_reformulation_provider(config: &AppConfig) -> &str {
     }
 }
 
-/// Report whether the Apple on-device model can be used
+/// Best guess at the language of a text, whatever the confidence.
+///
+/// `is_reliable()` is deliberately ignored: it rejects correct calls on short
+/// text ("Je pense qu'il faudrait déployer avant vendredi." comes back French
+/// at 34% and unreliable), and dictations are short. The guesses are only ever
+/// compared with one another, never trusted as absolute labels — on four words
+/// the detector happily calls English "Romanian", but it calls it that
+/// consistently, which is all the comparison needs.
+fn guess_language(text: &str) -> Option<whatlang::Lang> {
+    if text.split_whitespace().count() < 2 {
+        return None;
+    }
+    whatlang::detect_lang(&strip_accents(text))
+}
+
+/// Fold accented Latin letters onto their base letter.
+///
+/// Reformulating restores the accents the transcription missed, and on a short
+/// phrase that alone flips the verdict: "Le build est casse" reads as Catalan,
+/// "Le build est cassé." as French. Comparing both sides after folding leaves
+/// only the real difference — the wording — which is what the check is about.
+fn strip_accents(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            'à' | 'á' | 'â' | 'ä' | 'ã' | 'å' => 'a',
+            'À' | 'Á' | 'Â' | 'Ä' | 'Ã' | 'Å' => 'A',
+            'è' | 'é' | 'ê' | 'ë' => 'e',
+            'È' | 'É' | 'Ê' | 'Ë' => 'E',
+            'ì' | 'í' | 'î' | 'ï' => 'i',
+            'Ì' | 'Í' | 'Î' | 'Ï' => 'I',
+            'ò' | 'ó' | 'ô' | 'ö' | 'õ' => 'o',
+            'Ò' | 'Ó' | 'Ô' | 'Ö' | 'Õ' => 'O',
+            'ù' | 'ú' | 'û' | 'ü' => 'u',
+            'Ù' | 'Ú' | 'Û' | 'Ü' => 'U',
+            'ç' => 'c',
+            'Ç' => 'C',
+            'ñ' => 'n',
+            'Ñ' => 'N',
+            other => other,
+        })
+        .collect()
+}
+
+/// Whether two texts read as the same language.
+///
+/// Undetectable on either side means no opinion, and no opinion accepts.
+fn same_language(a: &str, b: &str) -> bool {
+    match (guess_language(a), guess_language(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => true,
+    }
+}
+
+/// What the answer has to satisfy for the model to have done its job
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LanguageCheck {
+    /// Reformulating must not change the language
+    SameAsInput,
+    /// Translating must change it
+    DifferentFromInput,
+}
+
+impl LanguageCheck {
+    fn accepts(&self, input: &str, answer: &str) -> bool {
+        match self {
+            LanguageCheck::SameAsInput => same_language(input, answer),
+            LanguageCheck::DifferentFromInput => !same_language(input, answer),
+        }
+    }
+}
+
+/// Report whether the Apple on-device model can be used/// Report whether the Apple on-device model can be used
 #[tauri::command]
 fn apple_intelligence_status() -> serde_json::Value {
     let availability = apple_intelligence::availability();
@@ -568,6 +639,10 @@ fn apple_intelligence_status() -> serde_json::Value {
         "message": availability.message(),
     })
 }
+
+/// How many times to ask before giving up and keeping the transcription.
+/// The model is stochastic: a rejected answer is often right on the next try.
+const ATTEMPTS: u32 = 3;
 
 /// Run the reformulation on Apple's on-device model.
 ///
@@ -580,6 +655,8 @@ async fn process_on_device(
     system_prompt: &str,
     text: &str,
     mode_label: &str,
+    check: LanguageCheck,
+    language_name: Option<&str>,
 ) -> String {
     let availability = apple_intelligence::availability();
     if availability != apple_intelligence::Availability::Available {
@@ -588,49 +665,80 @@ async fn process_on_device(
         return text.to_string();
     }
 
-    let instructions = system_prompt.to_string();
-    let prompt = text.to_string();
-    // The FFI call parks its thread until the model answers
-    let result =
-        tokio::task::spawn_blocking(move || apple_intelligence::respond(&instructions, &prompt))
-            .await;
+    // Naming the language beats asking for "the same language as the input",
+    // and the answer is checked against it below. Two attempts: the model is
+    // stochastic, so a rejected answer is worth asking again before giving up.
+    let instructions = match language_name {
+        Some(language) => format!(
+            "{} The answer MUST be written in {}. Output nothing that is not {}.",
+            system_prompt, language, language
+        ),
+        None => system_prompt.to_string(),
+    };
 
-    match result {
-        Ok(Ok(answer)) => {
-            let answer = answer.trim().to_string();
-            if answer.is_empty() {
-                tracing::error!("Apple Intelligence returned an empty answer");
+    for attempt in 1..=ATTEMPTS {
+        let instructions = instructions.clone();
+        let prompt = text.to_string();
+        // The FFI call parks its thread until the model answers
+        let result = tokio::task::spawn_blocking(move || {
+            apple_intelligence::respond(&instructions, &prompt)
+        })
+        .await;
+
+        let answer = match result {
+            Ok(Ok(answer)) => answer.trim().to_string(),
+            Ok(Err(e)) => {
+                tracing::error!("Apple Intelligence error: {}", e);
+                let _ = app.emit("config_error", format!("Apple Intelligence: {}", e));
                 return text.to_string();
             }
-            // A 3B model can wander off and start commenting on the text
-            // instead of rewriting it. Rewriting stays close to the original
-            // length, so treat a blow-up as a failure and keep the dictation.
-            if answer.chars().count() > text.chars().count() * 3 + 200 {
-                tracing::warn!(
-                    "Apple Intelligence answer looks runaway ({} chars for {} in), keeping the transcription",
-                    answer.chars().count(),
-                    text.chars().count()
-                );
+            Err(e) => {
+                tracing::error!("Apple Intelligence task panicked: {}", e);
                 return text.to_string();
             }
-            tracing::info!(
-                "Processed on device ({}): '{}' -> '{}'",
-                mode_label,
-                text,
+        };
+
+        if answer.is_empty() {
+            tracing::error!("Apple Intelligence returned an empty answer");
+            return text.to_string();
+        }
+
+        // A 3B model can wander off and start commenting on the text instead of
+        // rewriting it. Rewriting stays close to the original length, so treat
+        // a blow-up as a failure and keep the dictation.
+        if answer.chars().count() > text.chars().count() * 3 + 200 {
+            tracing::warn!(
+                "Apple Intelligence answer looks runaway ({} chars for {} in), keeping the transcription",
+                answer.chars().count(),
+                text.chars().count()
+            );
+            return text.to_string();
+        }
+
+        // The reason this check exists: asked to clean up a French dictation,
+        // the model answered in English 22 times out of 24. Pasting the right
+        // words in the wrong language is worse than pasting the raw dictation.
+        if !check.accepts(text, &answer) {
+            tracing::warn!(
+                "Apple Intelligence answer rejected on attempt {} ({:?}): {:?}",
+                attempt,
+                check,
                 answer
             );
+            continue;
+        }
+
+        tracing::info!(
+            "Processed on device ({}): '{}' -> '{}'",
+            mode_label,
+            text,
             answer
-        }
-        Ok(Err(e)) => {
-            tracing::error!("Apple Intelligence error: {}", e);
-            let _ = app.emit("config_error", format!("Apple Intelligence: {}", e));
-            text.to_string()
-        }
-        Err(e) => {
-            tracing::error!("Apple Intelligence task panicked: {}", e);
-            text.to_string()
-        }
+        );
+        return answer;
     }
+
+    tracing::warn!("Apple Intelligence kept answering in the wrong language, keeping the transcription");
+    text.to_string()
 }
 
 /// Process text: reformulate and/or translate in a single call, either on the
@@ -704,7 +812,13 @@ async fn process_text(
     tracing::info!("Processing text ({}, model: {}): '{}'", mode_label, model, text);
 
     if on_device {
-        return process_on_device(app, &system_prompt, text, mode_label).await;
+        // Reformulating must not change the language; translating must
+        let (check, language_name) = if needs_translation {
+            (LanguageCheck::DifferentFromInput, Some(lang_name))
+        } else {
+            (LanguageCheck::SameAsInput, None)
+        };
+        return process_on_device(app, &system_prompt, text, mode_label, check, language_name).await;
     }
 
     let client = reqwest::Client::new();
@@ -1378,13 +1492,18 @@ mod tests {
         }
     }
 
-    /// The on-device model answers in English unless told otherwise, which
-    /// silently turned a French dictation into an English one. Guard the
-    /// clause that fixes it, against the real production prompt.
+    /// The on-device model answers in English unless told otherwise: on a
+    /// French dictation it drifted 22 times out of 24 with the plain prompt.
+    /// The reinforcement cuts that to roughly one in twelve, and the check in
+    /// process_on_device turns what remains into a retry.
+    ///
+    /// Asserted as a rate, not a single pass: the model returns different
+    /// answers to identical calls, so a one-shot assertion is a coin flip. The
+    /// earlier version of this test was exactly that, and flaked.
     ///
     /// Skipped where Apple Intelligence is off (CI runners, older macOS).
     #[test]
-    fn on_device_reformulation_keeps_the_input_language() {
+    fn on_device_reformulation_mostly_keeps_the_language() {
         if apple_intelligence::availability() != apple_intelligence::Availability::Available {
             eprintln!("Apple Intelligence unavailable, skipping");
             return;
@@ -1393,16 +1512,20 @@ mod tests {
         let prompt = build_system_prompt(true, false, "", true);
         let dictation = "alors euh je voulais te dire que le le build il est casse \
                          sur linux euh faut qu'on regarde ca demain matin";
-        let answer = apple_intelligence::respond(&prompt, dictation)
-            .expect("on-device model should answer");
-        eprintln!("answer: {}", answer);
 
-        let lowered = answer.to_lowercase();
-        let french_markers = [" je ", " le ", " que ", " est ", "il "];
+        const SAMPLES: usize = 6;
+        let drifted = (0..SAMPLES)
+            .filter_map(|_| apple_intelligence::respond(&prompt, dictation).ok())
+            .filter(|answer| !same_language(dictation, answer))
+            .count();
+
+        // Generous on purpose: this guards against the prompt regressing to the
+        // 90% drift measured without it, not against the model's variance.
         assert!(
-            french_markers.iter().any(|m| lowered.contains(m)),
-            "answer drifted out of French: {}",
-            answer
+            drifted <= SAMPLES / 2,
+            "the language reinforcement stopped working: {}/{} answers drifted",
+            drifted,
+            SAMPLES
         );
     }
 
@@ -1517,5 +1640,107 @@ mod config_tests {
             ..AppConfig::default()
         };
         assert_eq!(resolve_reformulation_provider(&config), "apple");
+    }
+}
+
+#[cfg(test)]
+mod prompt_measurement {
+    use super::*;
+
+    /// The comparison is what carries the guarantee, so pin it. Absolute labels
+    /// are wrong on short text — the detector calls "Hello, how are you?"
+    /// Romanian — but it is wrong consistently, which is enough to tell two
+    /// texts apart.
+    /// The comparison carries the guarantee, so pin it. Absolute labels are
+    /// wrong on short text — the detector calls "Hi, how are you?" Romanian —
+    /// but it is wrong consistently, which is all a comparison needs.
+    #[test]
+    fn comparison_separates_languages() {
+        // Accent restoration must not read as a language change
+        assert!(same_language("Le build est casse", "Le build est cassé."));
+        assert!(same_language("salut euh comment ca va", "Salut, comment ça va ?"));
+        assert!(same_language(
+            "Le build est casse sur linux",
+            "Le build est cassé sur Linux."
+        ));
+
+        // Real drift must be caught, including on short phrases
+        assert!(!same_language(
+            "alors euh le build il est casse sur linux",
+            "The build is broken on Linux."
+        ));
+        assert!(!same_language("Salut, comment ça va ?", "Hi, how are you?"));
+
+        assert!(LanguageCheck::SameAsInput.accepts("Le build est casse", "Le build est cassé."));
+        assert!(!LanguageCheck::SameAsInput.accepts("Le build est casse", "The build is broken."));
+        assert!(LanguageCheck::DifferentFromInput
+            .accepts("Le build est casse", "The build is broken."));
+        assert!(!LanguageCheck::DifferentFromInput
+            .accepts("Salut, comment ça va ?", "Salut, comment ça va ?"));
+    }
+
+    /// End-to-end rate of what the user gets, reported as a ratio because the
+    /// model varies between identical calls.
+    #[test]
+    fn measure_end_to_end() {
+        if apple_intelligence::availability() != apple_intelligence::Availability::Available {
+            eprintln!("Apple Intelligence unavailable, skipping");
+            return;
+        }
+
+        let cases: Vec<(&str, String, LanguageCheck, Vec<&str>)> = vec![
+            (
+                "reformulation FR",
+                build_system_prompt(true, false, "", true),
+                LanguageCheck::SameAsInput,
+                vec![
+                    "alors euh je voulais te dire que le build il est casse sur linux faut qu'on regarde ca demain",
+                    "bon euh du coup je pense qu'il faudrait qu'on deploy avant vendredi non ?",
+                    "salut euh comment ca va ?",
+                ],
+            ),
+            (
+                "traduction FR->EN",
+                format!(
+                    "{} The answer MUST be written in English. Output nothing that is not English.",
+                    build_system_prompt(false, true, "English", true)
+                ),
+                LanguageCheck::DifferentFromInput,
+                vec![
+                    "Salut, comment ça va ?",
+                    "le build est casse sur linux",
+                    "merci beaucoup a demain",
+                ],
+            ),
+        ];
+
+        const REPS: usize = 6;
+        for (label, prompt, check, inputs) in cases {
+            let (mut failed, mut total, mut second_try) = (0, 0, 0);
+            for input in inputs {
+                for _ in 0..REPS {
+                    total += 1;
+                    let mut ok = false;
+                    for attempt in 1..=ATTEMPTS {
+                        if let Ok(out) = apple_intelligence::respond(&prompt, input) {
+                            if check.accepts(input, &out) {
+                                if attempt > 1 {
+                                    second_try += 1;
+                                }
+                                ok = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !ok {
+                        failed += 1;
+                    }
+                }
+            }
+            eprintln!(
+                "=== {} : {}/{} replis sur la transcription brute ({} rattrapes au 2e essai) ===",
+                label, failed, total, second_try
+            );
+        }
     }
 }
