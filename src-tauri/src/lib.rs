@@ -41,14 +41,27 @@ pub struct AppConfig {
     /// Selected audio input device name (empty = system default)
     #[serde(default)]
     pub audio_device: String,
-    /// Chat provider for reformulation/translation when STT is local (parakeet):
-    /// "openai", "voxtral", "gemini" or "groq"
-    #[serde(default = "default_stt_engine")]
-    pub parakeet_reformulation_provider: String,
+    /// Provider that reformulates and translates: "auto" follows the STT
+    /// engine, or name one explicitly ("apple", "openai", "groq", "voxtral",
+    /// "gemini").
+    ///
+    /// Renamed from parakeet_reformulation_provider, which only existed
+    /// because the local engine forced the question. The alias keeps configs
+    /// written by earlier versions working — without it every user would
+    /// silently fall back to the default and lose their choice.
+    #[serde(
+        default = "default_reformulation_provider",
+        alias = "parakeet_reformulation_provider"
+    )]
+    pub reformulation_provider: String,
 }
 
 fn default_stt_engine() -> String {
     "openai".to_string()
+}
+
+fn default_reformulation_provider() -> String {
+    "auto".to_string()
 }
 
 impl Default for AppConfig {
@@ -63,7 +76,7 @@ impl Default for AppConfig {
             gemini_api_key: String::new(),
             groq_api_key: String::new(),
             audio_device: String::new(),
-            parakeet_reformulation_provider: "openai".to_string(),
+            reformulation_provider: "auto".to_string(),
         }
     }
 }
@@ -533,6 +546,19 @@ fn build_system_prompt(
     format!("{} {}", prompt, reinforcement)
 }
 
+/// Which provider actually rewrites the text.
+///
+/// "auto" reproduces the behaviour from before this was configurable: the STT
+/// engine also rewrites its own output. Parakeet cannot rewrite anything, so
+/// it keeps the OpenAI default it always had.
+fn resolve_reformulation_provider(config: &AppConfig) -> &str {
+    match config.reformulation_provider.as_str() {
+        "auto" if config.stt_engine == "parakeet" => "openai",
+        "auto" => config.stt_engine.as_str(),
+        explicit => explicit,
+    }
+}
+
 /// Report whether the Apple on-device model can be used
 #[tauri::command]
 fn apple_intelligence_status() -> serde_json::Value {
@@ -616,13 +642,7 @@ async fn process_text(
     output_language: &str,
     config: &AppConfig,
 ) -> String {
-    // Determine API endpoint, model, and key based on engine.
-    // Parakeet is local STT: reformulation uses the configured chat provider.
-    let provider = if config.stt_engine == "parakeet" {
-        config.parakeet_reformulation_provider.as_str()
-    } else {
-        config.stt_engine.as_str()
-    };
+    let provider = resolve_reformulation_provider(config);
 
     let on_device = provider == "apple";
 
@@ -736,6 +756,12 @@ fn report_paste_failure(app: &AppHandle) {
         let _ = main.show();
         let _ = main.set_focus();
     }
+}
+
+/// Surface a crash from the webview, which has no console anyone can read
+#[tauri::command]
+fn log_frontend_error(message: String) {
+    tracing::error!("Frontend error: {}", message);
 }
 
 /// Open the OS pane where the paste permission is granted
@@ -1233,6 +1259,7 @@ pub fn run() {
             toggle_overlay,
             cancel_recording,
             open_accessibility_settings,
+            log_frontend_error,
             apple_intelligence_status,
             models::parakeet_model_status,
             models::download_parakeet_model,
@@ -1244,6 +1271,15 @@ pub fn run() {
 
             // Load saved config
             let saved_config = AppConfig::load(app.handle());
+            // Which provider ends up rewriting the text is worth stating: the
+            // setting is indirect ("auto"), and configs written by earlier
+            // versions reach it through a serde alias
+            tracing::info!(
+                "STT engine: {}, reformulation: {} (setting: {})",
+                saved_config.stt_engine,
+                resolve_reformulation_provider(&saved_config),
+                saved_config.reformulation_provider
+            );
             let state = app.state::<AppState>();
             let config = state.config.clone();
             tauri::async_runtime::block_on(async {
@@ -1420,5 +1456,66 @@ mod tests {
 
         assert_eq!(flushed.load(Ordering::SeqCst), 1);
         assert!(events.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    /// A config written by an earlier version stores the choice under the old
+    /// key. Without the serde alias every user would silently fall back to the
+    /// default and lose it — the kind of regression nobody reports.
+    #[test]
+    fn an_older_config_keeps_its_reformulation_provider() {
+        let older = r#"{
+            "global_shortcut": "CmdOrCtrl+Shift+Space",
+            "openai_api_key": "",
+            "output_language": "auto",
+            "stt_engine": "parakeet",
+            "parakeet_reformulation_provider": "groq"
+        }"#;
+
+        let config: AppConfig = serde_json::from_str(older).expect("older config should parse");
+        assert_eq!(config.reformulation_provider, "groq");
+        assert_eq!(resolve_reformulation_provider(&config), "groq");
+    }
+
+    /// Predates the setting entirely: nothing to migrate, follow the engine.
+    #[test]
+    fn a_config_without_the_field_follows_the_engine() {
+        let bare = r#"{
+            "global_shortcut": "CmdOrCtrl+Shift+Space",
+            "openai_api_key": "",
+            "output_language": "auto",
+            "stt_engine": "groq"
+        }"#;
+
+        let config: AppConfig = serde_json::from_str(bare).expect("bare config should parse");
+        assert_eq!(config.reformulation_provider, "auto");
+        assert_eq!(resolve_reformulation_provider(&config), "groq");
+    }
+
+    /// Parakeet cannot rewrite its own output, so auto has to name someone
+    #[test]
+    fn auto_on_the_local_engine_keeps_the_previous_default() {
+        let config = AppConfig {
+            stt_engine: "parakeet".to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(config.reformulation_provider, "auto");
+        assert_eq!(resolve_reformulation_provider(&config), "openai");
+    }
+
+    /// The combination this whole change exists for: cloud transcription,
+    /// on-device rewriting.
+    #[test]
+    fn an_api_engine_can_rewrite_on_device() {
+        let config = AppConfig {
+            stt_engine: "openai".to_string(),
+            reformulation_provider: "apple".to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(resolve_reformulation_provider(&config), "apple");
     }
 }

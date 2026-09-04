@@ -10,7 +10,7 @@ export interface AppConfig {
   gemini_api_key: string;
   groq_api_key: string;
   audio_device: string;
-  parakeet_reformulation_provider: string;
+  reformulation_provider: string;
 }
 
 export type Page = "dictation" | "engine" | "shortcut" | "settings";
