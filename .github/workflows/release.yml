@@ -65,6 +65,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS: sign with a stable self-signed certificate so the TCC grants
+          # (Accessibility, Apple Events) survive updates. Ad-hoc signing pins
+          # the designated requirement to the build's cdhash, which is why the
+          # automatic paste broke every time. See scripts/generate-signing-cert.sh.
+          #
+          # The identity is only set when the certificate is, otherwise codesign
+          # would look for an identity that is not in the keychain and fail the
+          # build: with no secrets configured this stays exactly as it was.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_CERTIFICATE != '' && 'Dictea Self Signed' || '' }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Dictea ${{ github.ref_name }}"
