@@ -226,6 +226,13 @@ body {
   padding: 0 10px 10px;
 }
 
+.sidebar-version {
+  padding: 0 14px 8px;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  opacity: 0.55;
+}
+
 .sidebar-footer {
   padding: 8px 12px 4px;
   color: var(--text-secondary);
@@ -986,4 +993,75 @@ body {
 
 .provider-group:first-of-type {
   margin-top: 8px;
+}
+
+/* ============================================
+   DONATION
+   ============================================ */
+
+/* Visible without taking over: the accent tint marks it out, but the scale
+   stays below the settings blocks around it. */
+/* Same fade as the sidebar rule, so the break reads as part of the app */
+.section-separator {
+  height: 1px;
+  margin: 16px 0 10px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--separator) 15%,
+    var(--separator) 85%,
+    transparent
+  );
+}
+
+.donate-banner {
+  padding: 11px 14px;
+  border-radius: 10px;
+  margin-bottom: 6px;
+  background: linear-gradient(
+    135deg,
+    rgba(99, 102, 241, 0.12),
+    rgba(139, 92, 246, 0.07)
+  );
+  border: 1px solid rgba(139, 92, 246, 0.22);
+}
+
+.donate-banner h2 {
+  font-size: 0.78rem;
+  font-weight: 700;
+  margin-bottom: 2px;
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.donate-banner p {
+  margin: 0 0 9px;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.donate-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.donate-row .btn-donate {
+  padding: 4px 11px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.donate-row .btn-donate:hover {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.24);
 }

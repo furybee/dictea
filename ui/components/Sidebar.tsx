@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { Mic, Zap, Keyboard, Settings, KeyRound } from "lucide-react";
 import { useI18n, type TranslationKey } from "../i18n";
 import type { Page } from "../types";
@@ -28,6 +30,11 @@ interface SidebarProps {
 
 export function Sidebar({ activePage, onPageChange }: SidebarProps) {
   const { t } = useI18n();
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(console.error);
+  }, []);
 
   return (
     <aside className="sidebar">
@@ -50,6 +57,7 @@ export function Sidebar({ activePage, onPageChange }: SidebarProps) {
       </nav>
 
       <div className="sidebar-bottom">
+        {appVersion && <p className="sidebar-version">v{appVersion}</p>}
         <button
           data-page="settings"
           className={`sidebar-item${activePage === "settings" ? " active" : ""}`}

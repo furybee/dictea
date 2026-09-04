@@ -924,6 +924,34 @@ fn log_frontend_error(message: String) {
     tracing::error!("Frontend error: {}", message);
 }
 
+/// Open one of the donation pages in the browser.
+///
+/// Takes a name rather than a URL on purpose: a command that opens whatever
+/// address the webview hands it turns any frontend flaw into a way of sending
+/// the user somewhere else. The addresses live here.
+#[tauri::command]
+fn open_donation_link(target: String) -> Result<(), String> {
+    let url = match target.as_str() {
+        "coffee" => "https://www.buymeacoffee.com/xyugxh7bk",
+        "card" => "https://donate.stripe.com/fZeg1Sgml971dbieUU",
+        "paypal" => "https://www.paypal.com/donate/?hosted_button_id=T7KZA4MLT5XTU",
+        other => return Err(format!("Unknown donation target: {}", other)),
+    };
+
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(target_os = "linux")]
+    let opener = "xdg-open";
+
+    std::process::Command::new(opener)
+        .arg(url)
+        .spawn()
+        .map_err(|e| format!("Cannot open the browser: {}", e))?;
+    Ok(())
+}
+
 /// Open the OS pane where the paste permission is granted
 #[tauri::command]
 fn open_accessibility_settings() {
@@ -1422,6 +1450,7 @@ pub fn run() {
             log_frontend_error,
             apple_intelligence_status,
             test_provider_key,
+            open_donation_link,
             models::parakeet_model_status,
             models::download_parakeet_model,
             models::cancel_parakeet_download,
