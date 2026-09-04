@@ -59,22 +59,56 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # Import the certificate ourselves rather than handing APPLE_CERTIFICATE
+      # to tauri-action. Given that variable, Tauri enumerates the keychain
+      # through identity::list(), which only looks for certificates whose name
+      # starts with an Apple prefix ("Developer ID Application:", "Apple
+      # Development:", ...) and which carry an organizational unit. A
+      # self-signed certificate matches none of them and the build dies on
+      # "failed to resolve signing identity".
+      #
+      # With only APPLE_SIGNING_IDENTITY set, Tauri skips that lookup and hands
+      # the name straight to codesign, which signs happily with an untrusted
+      # certificate as long as its keychain is in the search list.
+      - name: Set up the macOS signing keychain
+        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/dictea-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          CERT="$RUNNER_TEMP/certificate.p12"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -A
+          # Without this, codesign prompts for keychain access and hangs
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          # codesign resolves the identity through the search list
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$CERT"
+
+          echo "Identities available to codesign:"
+          security find-identity -p codesigning "$KEYCHAIN"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS: sign with a stable self-signed certificate so the TCC grants
-          # (Accessibility, Apple Events) survive updates. Ad-hoc signing pins
-          # the designated requirement to the build's cdhash, which is why the
-          # automatic paste broke every time. See scripts/generate-signing-cert.sh.
+          # Signing keeps the TCC grants (Accessibility, Apple Events) across
+          # updates: ad-hoc signing pins the designated requirement to the
+          # build's cdhash, which is why the automatic paste broke every time.
+          # See scripts/generate-signing-cert.sh.
           #
-          # The identity is only set when the certificate is, otherwise codesign
-          # would look for an identity that is not in the keychain and fail the
-          # build: with no secrets configured this stays exactly as it was.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # Set only when the certificate secret exists, otherwise codesign
+          # would look for an identity no keychain holds and fail the build:
+          # with no secrets configured this stays exactly as it was.
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_CERTIFICATE != '' && 'Dictea Self Signed' || '' }}
         with:
           tagName: ${{ github.ref_name }}
